@@ -71,4 +71,4 @@ erDiagram
 
 ## 导入数据
 
-读取 `img/_cover-manifest.json`，以 `category/file` 与 `music` 目录配对、以 `image` 字段与 `img` 目录配对。`source_path` 唯一键使重跑可跳过已导入记录。清单中两条 `review` 记录因标题为 `null` 而跳过；其他 504 条 `matched` 记录作为待导入素材。导入后可由管理员完善流派、情绪等标签。初始歌曲均为免费，避免在没有 FFmpeg 的机器上出现无法安全试听的 VIP 歌曲。
+读取 `img/_cover-manifest.json`，以 `category/file` 与 `music` 目录配对、以 `image` 字段与 `img` 目录配对。`source_path` 唯一键使重跑可跳过已导入记录。当前清单包含 461 条 `matched` 记录及两条因标题为 `null` 而跳过的 `review` 记录；历史上的 43 条 HTML 伪音频及其封面已删除。导入后可由管理员完善流派、情绪等标签。初始歌曲均为免费，避免在没有 FFmpeg 的机器上出现无法安全试听的 VIP 歌曲。

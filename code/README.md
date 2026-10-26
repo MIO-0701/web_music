@@ -10,7 +10,7 @@ JDK 21 + Spring Boot 3.5，提供曲库、会员、播放记录、歌单、评�
 4. 首次导入本地素材时设置 `IMPORT_LOCAL_MUSIC=true`，或执行 `./tools/start-local.ps1 -Import`。导入完成后改回 `false`。导入读取 `../img/_cover-manifest.json`，按 `source_path` 幂等写入 MinIO。
 5. 前端执行 `npm install`、`npm run dev`。后端端口为 8080，MinIO 控制台为 9001。接口清单见 [`../docs/api.md`](../docs/api.md)。
 
-当前本机导入的 504 条匹配记录中有 43 个伪 MP3（内容为 HTML），已下架；公开曲库为 461 首。两条 `review` 记录原本就未导入。无效文件清单为 [`../data/invalid-audio.csv`](../data/invalid-audio.csv)。上传接口现在会拒绝这类文件；源文件替换后需要先清理对应的旧记录再重新导入。歌曲 504 已设置为 VIP，可测试 30 秒独立试听。
+最初导入的 504 条匹配记录中有 43 个伪 MP3（内容为 HTML）。这 43 个本地音频及对应封面、清单条目、数据库记录和 MinIO 对象已删除；当前曲库为 461 首。两条 `review` 记录原本就未导入。历史无效文件清单为 [`../data/invalid-audio.csv`](../data/invalid-audio.csv)。上传接口会拒绝这类文件；若以后取得真实音频，可重新导入。歌曲 504 已设置为 VIP，可测试 30 秒独立试听。
 
 可选：`docker compose --profile full up -d --build` 将后端也放入容器，并只读挂载素材和实验数据目录。此方式需能访问 Docker Hub 的 Maven/JRE 基础镜像。MinIO 官方社区版改为源码发行后，本项目固定使用 [coollabsio 的 MinIO 源码构建镜像](https://github.com/coollabsio/minio)；相关背景见 [MinIO 项目说明](https://github.com/minio/minio/blob/master/README.md)。
 

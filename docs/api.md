@@ -2,7 +2,7 @@
 
 本机地址：`http://localhost:8080`。表中的路径均以 `/api` 开头。标记为「登录」的接口使用请求头 `Authorization: Bearer <token>`；「管理员」还要求 `ADMIN` 角色。普通接口请求体为 JSON，歌曲上传为 `multipart/form-data`。
 
-本机验收数据：公开曲库 461 首；歌曲 `504` 为 VIP，适合测试普通用户试听与会员完整播放。另有 43 条无效音频仅在管理端可见，均已下架；源文件路径见 [`../data/invalid-audio.csv`](../data/invalid-audio.csv)。管理员账号由根目录 `.env` 初始化，不要将真实令牌写进测试报告。
+本机验收数据：曲库 461 首；歌曲 `504` 为 VIP，适合测试普通用户试听与会员完整播放。最初导入的 43 条无效音频及对应封面已从本地、MinIO 和数据库删除；历史路径见 [`../data/invalid-audio.csv`](../data/invalid-audio.csv)。管理员账号由根目录 `.env` 初始化，不要将真实令牌写进测试报告。
 
 注册与登录返回 `token`、`tokenType`、`expiresIn`（秒）和 `user`。分页结果统一为 `{ "items": [], "total": 0, "page": 1, "size": 20 }`；`page` 从 1 开始，`size` 限制在 1–100。错误响应为 `{ "error": "原因" }`，常见状态码：400 参数错误、401 未登录或登录失败、403 无权限、404 资源不存在或已下架、409 数据冲突、429 AI 配额超限、503 依赖服务不可用。
 
