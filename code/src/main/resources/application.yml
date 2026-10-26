@@ -1,0 +1,44 @@
+server:
+  port: ${SERVER_PORT:8080}
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/shengyu?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USER:shengyu}
+    password: ${DB_PASSWORD:shengyu_dev}
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 60MB
+  task:
+    scheduling:
+      pool:
+        size: 2
+music:
+  cors-origin: ${CORS_ORIGIN:http://localhost:5173}
+  admin:
+    username: ${ADMIN_USERNAME:}
+    password: ${ADMIN_PASSWORD:}
+  storage:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:shengyu}
+    secret-key: ${MINIO_SECRET_KEY:shengyu_dev_password}
+    bucket: ${MINIO_BUCKET:shengyu-media}
+  import:
+    enabled: ${IMPORT_LOCAL_MUSIC:false}
+    music-dir: ${MUSIC_DIR:../music}
+    image-dir: ${IMAGE_DIR:../img}
+  deepseek:
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    model: ${DEEPSEEK_MODEL:deepseek-flash}
+    api-key: ${DEEPSEEK_API_KEY:}
+  preview:
+    ffmpeg: ${FFMPEG_BIN:ffmpeg}
+    seconds: 30
+  experiment:
+    dataset-path: ${MUSIC_EXPERIMENT_DATASET_PATH:../data/hetrec2011-lastfm-2k.zip}

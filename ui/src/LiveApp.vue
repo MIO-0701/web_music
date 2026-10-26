@@ -1,0 +1,364 @@
+<script setup>
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import AlbumCover from './AlbumCover.vue'
+import Icon from './Icon.vue'
+import TrackTable from './TrackTable.vue'
+import { getToken, queryString, request, setToken, songView } from './api'
+
+const userNav = [
+  ['home', '发现音乐', 'home'], ['search', '曲库检索', 'search'], ['player', '播放页面', 'disc'],
+  ['recommend', '每日推荐', 'spark'], ['ai', 'AI 查歌', 'spark'], ['favorites', '我的收藏', 'heart'],
+  ['playlists', '我的歌单', 'list'], ['history', '播放历史', 'history'], ['membership', '会员中心', 'crown']
+]
+const adminNav = [['dashboard', '数据概览', 'chart'], ['members', '用户与会员', 'users'], ['songs', '歌曲管理', 'music'], ['comments', '评论管理', 'comment']]
+const labels = Object.fromEntries([...userNav, ...adminNav].map(([id, label]) => [id, label]))
+const page = ref('home')
+const mobileOpen = ref(false)
+const user = ref(null)
+const loginOpen = ref(false)
+const authMode = ref('login')
+const loginName = ref('')
+const loginPassword = ref('')
+const registerName = ref('')
+const pendingPage = ref('home')
+const busy = ref(false)
+const toast = ref('')
+const error = ref('')
+const hot = ref([])
+const songs = ref([])
+const results = ref([])
+const total = ref(0)
+const listPage = ref(1)
+const keyword = ref('')
+const language = ref('')
+const current = ref(null)
+const audioElement = ref(null)
+const audioUrl = ref('')
+const playing = ref(false)
+const reported = ref(false)
+const progress = ref(0)
+const playbackDuration = ref(0)
+const favorites = ref([])
+const favoriteIds = ref(new Set())
+const playlists = ref([])
+const playlistName = ref('')
+const activePlaylist = ref(null)
+const playlistRename = ref('')
+const selectedPlaylist = ref('')
+const history = ref([])
+const algorithm = ref('TAG')
+const recommendations = ref([])
+const chatText = ref('')
+const conversationId = ref(null)
+const conversations = ref([])
+const messages = ref([])
+const songComments = ref([])
+const commentText = ref('')
+const dashboard = ref(null)
+const adminUsers = ref([])
+const adminSongs = ref([])
+const adminComments = ref([])
+const adminTotal = ref(0)
+const membershipDraft = ref({})
+const songEdit = ref(null)
+const uploadOpen = ref(false)
+const uploadForm = ref({ title: '', artist: '', album: '', language: 'cn', genre: '未分类', tags: '', vip: false, audio: null, cover: null })
+let toastTimer, searchTimer
+
+const isAdminPage = computed(() => adminNav.some(([id]) => id === page.value))
+const isMember = computed(() => !!user.value?.membershipExpiresAt && new Date(user.value.membershipExpiresAt).getTime() > Date.now())
+const isAdmin = computed(() => user.value?.role === 'ADMIN')
+const gatedPages = new Set(['player', 'recommend', 'ai', 'favorites', 'playlists', 'history', 'membership'])
+
+function notify(message) { toast.value = message; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.value = '' }, 3600) }
+async function run(work) { try { busy.value = true; error.value = ''; return await work() } catch (ex) { error.value = ex.message; notify(ex.message) } finally { busy.value = false } }
+function requireLogin(target = page.value) { if (user.value) return true; pendingPage.value = target; loginOpen.value = true; return false }
+function navigate(id) {
+  if (adminNav.some(([key]) => key === id) && !isAdmin.value) { if (!user.value) { pendingPage.value = id; loginOpen.value = true } else notify('需要管理员权限'); return }
+  if (gatedPages.has(id) && !requireLogin(id)) return
+  page.value = id; listPage.value = 1; mobileOpen.value = false; window.location.hash = id
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+async function login() {
+  await run(async () => {
+    const response = await request(authMode.value === 'login' ? '/auth/login' : '/auth/register', {
+      method: 'POST', body: authMode.value === 'login'
+        ? { username: loginName.value, password: loginPassword.value }
+        : { username: loginName.value, password: loginPassword.value, displayName: registerName.value }
+    })
+    setToken(response.token); user.value = response.user; loginOpen.value = false; loginPassword.value = ''
+    notify(`欢迎，${user.value.displayName}`)
+    navigate(pendingPage.value)
+    await Promise.all([loadHot(), loadFavorites()])
+  })
+}
+async function logout() {
+  try { await request('/auth/logout', { method: 'POST' }) } catch { /* local logout still applies */ }
+  setToken(''); user.value = null; favorites.value = []; favoriteIds.value = new Set(); navigate('home'); notify('已退出登录')
+}
+async function loadHot() { await run(async () => { hot.value = (await request('/songs/hot')).map(songView) }) }
+async function loadSearch() {
+  await run(async () => {
+    const data = await request(`/songs?${queryString({ keyword: keyword.value, language: language.value, page: listPage.value, size: 20 })}`)
+    songs.value = data.items.map(songView); total.value = data.total
+  })
+}
+async function playSong(track) {
+  if (!requireLogin('player')) return
+  current.value = songView(track)
+  reported.value = false; progress.value = 0; playbackDuration.value = 0; navigate('player')
+  await run(async () => {
+    const response = await request(`/songs/${current.value.id}/audio`, { raw: true })
+    const blob = await response.blob()
+    if (audioUrl.value) URL.revokeObjectURL(audioUrl.value)
+    audioUrl.value = URL.createObjectURL(blob)
+    await nextTick()
+    audioElement.value?.load()
+    try { await audioElement.value?.play(); playing.value = true }
+    catch { notify('点击播放器中的播放按钮开始收听') }
+    await loadSongComments()
+  })
+}
+function togglePlayback() {
+  if (!current.value || !audioElement.value) return
+  if (audioElement.value.paused) audioElement.value.play().catch(() => notify('无法播放音频'))
+  else audioElement.value.pause()
+}
+function seekAudio(event) {
+  if (audioElement.value && Number.isFinite(audioElement.value.duration)) audioElement.value.currentTime = Number(event.target.value)
+}
+function formatTime(value) {
+  const seconds = Number.isFinite(value) ? Math.floor(value) : 0
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+function onTimeUpdate() {
+  if (!audioElement.value || !current.value) return
+  progress.value = audioElement.value.currentTime
+  if (!reported.value && progress.value >= 10) {
+    reported.value = true
+    request('/me/play-events', { method: 'POST', body: { songId: current.value.id, secondsPlayed: Math.floor(progress.value), completed: false } }).catch(() => {})
+  }
+}
+async function loadSongComments() {
+  if (!current.value) return
+  const data = await request(`/songs/${current.value.id}/comments`)
+  songComments.value = data.items
+}
+async function submitComment() {
+  if (!current.value || !commentText.value.trim()) return
+  await run(async () => { await request(`/songs/${current.value.id}/comments`, { method: 'POST', body: { content: commentText.value.trim() } }); commentText.value = ''; notify('评论已提交，等待审核') })
+}
+async function loadFavorites() {
+  if (!user.value) return
+  const data = await request('/me/favorites?size=100')
+  favorites.value = data.items.map(songView); favoriteIds.value = new Set(favorites.value.map(item => item.id))
+}
+async function toggleFavorite(track) {
+  if (!requireLogin()) return
+  await run(async () => {
+    await request(`/me/favorites/${track.id}`, { method: favoriteIds.value.has(track.id) ? 'DELETE' : 'POST' })
+    await loadFavorites(); notify(favoriteIds.value.has(track.id) ? '已收藏' : '已取消收藏')
+  })
+}
+async function loadPlaylists() { playlists.value = await request('/me/playlists') }
+async function createPlaylist() {
+  if (!playlistName.value.trim()) return
+  await run(async () => { await request('/me/playlists', { method: 'POST', body: { name: playlistName.value.trim() } }); playlistName.value = ''; await loadPlaylists(); notify('歌单已创建') })
+}
+async function openPlaylist(id) {
+  await run(async () => { const data = await request(`/me/playlists/${id}`); activePlaylist.value = { ...data, songs: data.songs.map(songView) }; playlistRename.value = data.name })
+}
+async function renamePlaylist() {
+  if (!activePlaylist.value || !playlistRename.value.trim()) return
+  await run(async () => { await request(`/me/playlists/${activePlaylist.value.id}`, { method: 'PUT', body: { name: playlistRename.value.trim() } }); await loadPlaylists(); await openPlaylist(activePlaylist.value.id); notify('歌单已重命名') })
+}
+async function deletePlaylist() {
+  if (!activePlaylist.value || !window.confirm(`确定删除“${activePlaylist.value.name}”？`)) return
+  await run(async () => { await request(`/me/playlists/${activePlaylist.value.id}`, { method: 'DELETE' }); activePlaylist.value = null; await loadPlaylists(); notify('歌单已删除') })
+}
+async function addToPlaylist() {
+  if (!current.value || !selectedPlaylist.value) return
+  await run(async () => { await request(`/me/playlists/${selectedPlaylist.value}/songs/${current.value.id}`, { method: 'POST' }); notify('已加入歌单') })
+}
+async function removeFromPlaylist(songId) {
+  await run(async () => { await request(`/me/playlists/${activePlaylist.value.id}/songs/${songId}`, { method: 'DELETE' }); await openPlaylist(activePlaylist.value.id) })
+}
+async function loadRecommendations() {
+  await run(async () => { recommendations.value = (await request(`/me/recommendations?algorithm=${algorithm.value}`)).map(songView) })
+}
+async function loadAi() { conversations.value = await request('/me/ai/conversations') }
+async function openConversation(id) {
+  await run(async () => {
+    conversationId.value = id
+    const old = await request(`/me/ai/conversations/${id}/messages`)
+    messages.value = await Promise.all(old.map(async item => {
+      if (item.role !== 'ASSISTANT' || !item.result_song_ids) return item
+      let ids = []
+      try { ids = typeof item.result_song_ids === 'string' ? JSON.parse(item.result_song_ids) : item.result_song_ids } catch { return item }
+      const songs = await Promise.all(ids.slice(0, 10).map(songId => request(`/songs/${songId}`).then(songView).catch(() => null)))
+      return { ...item, songs: songs.filter(Boolean) }
+    }))
+    navigate('ai')
+  })
+}
+async function sendChat() {
+  const text = chatText.value.trim(); if (!text) return
+  chatText.value = ''
+  messages.value.push({ role: 'USER', content: text, id: `temp-${Date.now()}` })
+  await run(async () => {
+    const data = await request('/me/ai/chat', { method: 'POST', body: { conversationId: conversationId.value, message: text } })
+    conversationId.value = data.conversationId
+    messages.value.push({ role: 'ASSISTANT', content: data.reply, songs: data.songs.map(songView), id: `answer-${Date.now()}` })
+    await loadAi()
+  })
+}
+async function loadDashboard() { dashboard.value = await request('/admin/dashboard') }
+async function loadAdminUsers() {
+  const data = await request(`/admin/users?page=${listPage.value}&size=10`)
+  adminUsers.value = data.items; adminTotal.value = data.total
+  membershipDraft.value = Object.fromEntries(data.items.map(item => [item.id, item.membership_expires_at ? String(item.membership_expires_at).slice(0, 16) : '']))
+}
+async function saveMembership(item) {
+  await run(async () => {
+    const value = membershipDraft.value[item.id]
+    await request(`/admin/users/${item.id}/membership`, { method: 'PUT', body: { expiresAt: value ? `${value}:00` : null } })
+    await loadAdminUsers(); notify('会员有效期已更新')
+  })
+}
+async function toggleUser(item) {
+  await run(async () => { await request(`/admin/users/${item.id}/enabled?value=${!item.enabled}`, { method: 'PATCH' }); await loadAdminUsers() })
+}
+async function loadAdminSongs() {
+  const data = await request(`/admin/songs?page=${listPage.value}&size=10`)
+  adminSongs.value = data.items.map(songView); adminTotal.value = data.total
+}
+async function togglePublished(track) {
+  await run(async () => { await request(`/admin/songs/${track.id}/publish?value=${!track.published}`, { method: 'PATCH' }); await loadAdminSongs(); notify('上下架状态已更新') })
+}
+async function saveSong() {
+  if (!songEdit.value) return
+  await run(async () => {
+    const s = songEdit.value
+    await request(`/admin/songs/${s.id}`, { method: 'PUT', body: {
+      title: s.title, artist: s.artist, album: s.album, genre: s.category, description: s.description || '',
+      vip: s.vip, published: s.published, tags: s.tagsText.split(',').map(x => x.trim()).filter(Boolean)
+    } })
+    songEdit.value = null; await loadAdminSongs(); notify('歌曲信息已更新')
+  })
+}
+async function openSongEdit(track) {
+  await run(async () => {
+    const detail = await request(`/admin/songs/${track.id}`)
+    songEdit.value = { ...songView(detail), description: detail.description || '', published: !!detail.published, tagsText: (detail.tags || []).join(', ') }
+  })
+}
+async function uploadSong() {
+  if (!uploadForm.value.audio) { notify('请选择 MP3 音频'); return }
+  await run(async () => {
+    const form = new FormData()
+    for (const key of ['title', 'artist', 'album', 'language', 'genre', 'vip']) form.append(key, uploadForm.value[key])
+    form.append('audio', uploadForm.value.audio)
+    if (uploadForm.value.cover) form.append('cover', uploadForm.value.cover)
+    uploadForm.value.tags.split(',').map(x => x.trim()).filter(Boolean).forEach(tag => form.append('tags', tag))
+    await request('/admin/songs', { method: 'POST', body: form })
+    uploadOpen.value = false; await loadAdminSongs(); notify('歌曲已上传')
+  })
+}
+async function loadAdminComments() {
+  const data = await request(`/admin/comments?page=${listPage.value}&size=10`)
+  adminComments.value = data.items; adminTotal.value = data.total
+}
+async function moderate(item, status) {
+  await run(async () => { await request(`/admin/comments/${item.id}/status?value=${status}`, { method: 'PATCH' }); await loadAdminComments(); notify('评论状态已更新') })
+}
+async function rebuild() { await run(async () => { const data = await request('/admin/recommendations/rebuild', { method: 'POST' }); notify(`已为 ${data.usersProcessed} 位用户重算推荐`) }) }
+async function evaluate() { await run(async () => { await request('/admin/recommendations/evaluate', { method: 'POST' }); await loadDashboard(); notify('算法实验已完成') }) }
+
+async function loadPage() {
+  if (!user.value && gatedPages.has(page.value)) return
+  try {
+    if (page.value === 'search') await loadSearch()
+    else if (page.value === 'favorites') await loadFavorites()
+    else if (page.value === 'playlists') await loadPlaylists()
+    else if (page.value === 'history') { const data = await request('/me/history?size=50'); history.value = data.items.map(songView) }
+    else if (page.value === 'recommend') await loadRecommendations()
+    else if (page.value === 'ai') await loadAi()
+    else if (page.value === 'dashboard') await loadDashboard()
+    else if (page.value === 'members') await loadAdminUsers()
+    else if (page.value === 'songs') await loadAdminSongs()
+    else if (page.value === 'comments') await loadAdminComments()
+  } catch (ex) { error.value = ex.message; notify(ex.message) }
+}
+function nextListPage(delta) { const next = listPage.value + delta; if (next < 1 || (delta > 0 && next * 10 - 10 >= adminTotal.value && isAdminPage.value)) return; listPage.value = next; loadPage() }
+function hashChange() { const target = window.location.hash.slice(1); if (labels[target] && target !== page.value) navigate(target) }
+watch(page, loadPage)
+watch([keyword, language], () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { if (page.value === 'search') { listPage.value = 1; loadSearch() } }, 300) })
+watch(algorithm, () => { if (page.value === 'recommend') loadRecommendations() })
+onMounted(async () => {
+  if (getToken()) { try { user.value = await request('/auth/me') } catch { setToken('') } }
+  hashChange()
+  await loadHot()
+  if (user.value) await loadFavorites()
+  window.addEventListener('hashchange', hashChange)
+})
+onUnmounted(() => { clearTimeout(toastTimer); clearTimeout(searchTimer); if (audioUrl.value) URL.revokeObjectURL(audioUrl.value); window.removeEventListener('hashchange', hashChange) })
+</script>
+
+<template>
+  <div class="app-shell live-app" :class="{ 'admin-mode': isAdminPage }">
+    <div v-if="mobileOpen" class="mobile-scrim" @click="mobileOpen = false"></div>
+    <aside class="sidebar" :class="{ 'sidebar-open': mobileOpen }">
+      <button class="brand" type="button" @click="navigate('home')"><span class="brand-symbol"><i></i><i></i><i></i><i></i></span><span class="brand-text">声屿<span>SHENGYU MUSIC</span></span></button>
+      <div class="sidebar-scroll">
+        <div class="nav-group-title">探索音乐 <span>EXPLORE</span></div>
+        <nav class="side-nav"><button v-for="[id, label, icon] in userNav.slice(0, 5)" :key="id" :class="{ active: page === id }" type="button" @click="navigate(id)"><Icon :name="icon" :size="19" /><span>{{ label }}</span></button></nav>
+        <div class="nav-group-title library-title">我的音乐 <span>MY LIBRARY</span></div>
+        <nav class="side-nav"><button v-for="[id, label, icon] in userNav.slice(5)" :key="id" :class="{ active: page === id }" type="button" @click="navigate(id)"><Icon :name="icon" :size="19" /><span>{{ label }}</span></button></nav>
+        <template v-if="isAdmin"><div class="nav-group-title admin-title">管理后台 <span>WORKSPACE</span></div><nav class="side-nav"><button v-for="[id, label, icon] in adminNav" :key="id" :class="{ active: page === id }" type="button" @click="navigate(id)"><Icon :name="icon" :size="19" /><span>{{ label }}</span></button></nav></template>
+      </div>
+      <button class="sidebar-profile" type="button" @click="user ? navigate('membership') : loginOpen = true"><span class="profile-avatar">{{ (user?.displayName || '访').slice(0, 1) }}</span><span class="profile-copy"><strong>{{ user?.displayName || '游客' }}</strong><small>{{ isAdmin ? '管理员' : isMember ? '会员生效中' : user ? '普通用户' : '登录后收听' }}</small></span><Icon name="chevron" :size="16" /></button>
+    </aside>
+    <div class="app-main">
+      <header class="topbar"><div class="topbar-left"><button class="mobile-menu icon-button" type="button" @click="mobileOpen = true"><Icon name="menu" /></button><span class="breadcrumb">声屿音乐</span><span class="breadcrumb-slash">/</span><strong>{{ labels[page] }}</strong></div><div class="topbar-right"><button class="top-search" type="button" @click="navigate('search')"><Icon name="search" :size="17" /><span>搜索歌曲、歌手或专辑</span></button><button v-if="user" class="live-logout" type="button" @click="logout">退出登录</button><button v-else class="live-login" type="button" @click="loginOpen = true">登录 / 注册</button><button class="top-avatar" type="button" @click="user ? navigate('membership') : loginOpen = true">{{ (user?.displayName || '访').slice(0, 1) }}</button></div></header>
+      <audio ref="audioElement" :src="audioUrl" preload="metadata" class="live-hidden-audio" @play="playing = true" @pause="playing = false" @loadedmetadata="playbackDuration = audioElement?.duration || 0" @timeupdate="onTimeUpdate" @ended="playing = false"></audio>
+      <main class="content">
+        <div v-if="error" class="live-error">{{ error }} <button type="button" @click="error = ''; loadPage()">重试</button></div>
+
+        <template v-if="page === 'home'">
+          <section class="hero-card"><div class="hero-copy"><span class="eyebrow light"><span class="eyebrow-line"></span> YOUR DAILY SOUNDTRACK</span><h1>让音乐<br /><em>找到你。</em></h1><p>在每一个值得被记住的瞬间，遇见一首刚好懂你的歌。</p><button class="button button-light" type="button" @click="navigate('recommend')">探索今日推荐 <Icon name="arrow" :size="18" /></button><div class="hero-counter"><strong>01 / 01</strong><span></span><small>每日精选</small></div></div><div class="hero-art"><div class="hero-vinyl"><span></span></div><div class="hero-art-cover"><AlbumCover :track="hot[0] || { title: '声屿音乐', tone: 'cover-sunset' }" size="hero" show-title /></div></div></section>
+          <div class="section-heading"><div><span class="eyebrow">MADE FOR YOU</span><h2>今天，听点不一样的</h2></div></div><div class="feature-grid"><button class="feature-card feature-daily" type="button" @click="navigate('recommend')"><span class="feature-icon"><Icon name="spark" /></span><span class="feature-copy"><small>每日更新 · 为你挑选</small><strong>每日推荐</strong><span>从你喜欢的旋律出发，发现更多可能。</span></span><Icon name="arrow" :size="20" class="feature-arrow" /></button><button class="feature-card feature-ai" type="button" @click="navigate('ai')"><span class="feature-icon"><Icon name="spark" /></span><span class="feature-ai-quote">“想听适合雨天独处的<br />温柔中文歌”</span><span class="feature-copy"><small>描述心情 · 发现好歌</small><strong>AI 灵感查歌</strong><span>说出你的心情，让音乐接住你。</span></span><Icon name="arrow" :size="20" class="feature-arrow" /></button></div><div class="section-heading compact"><div><span class="eyebrow">TRENDING NOW</span><h2>正在被大家喜欢</h2></div><button class="text-link" type="button" @click="navigate('search')">探索曲库 <Icon name="arrow" :size="17" /></button></div><TrackTable :tracks="hot.slice(0, 8)" show-plays @select="playSong" /><div v-if="!hot.length" class="empty-state">曲库暂无已上架歌曲。管理员可先导入本地音乐。</div>
+        </template>
+
+        <template v-else-if="page === 'search'"><div class="page-intro"><span class="eyebrow">EXPLORE THE SOUND</span><h1>找到下一首<span class="accent-dot">.</span></h1><p>浏览曲库中真实上架的歌曲。</p></div><div class="search-panel"><Icon name="search" :size="23" /><input v-model="keyword" type="search" placeholder="搜索歌曲、歌手或专辑" aria-label="搜索歌曲" /><select v-model="language" aria-label="筛选语言"><option value="">全部语言</option><option value="cn">中文</option><option value="en">英文</option><option value="jp">日文</option><option value="fr">法文</option><option value="ru">俄文</option></select></div><div class="section-heading"><div><span class="eyebrow">ALL TRACKS</span><h2>曲库歌曲 <sup>{{ total }}</sup></h2></div><span class="subtle-text">第 {{ listPage }} 页</span></div><TrackTable :tracks="songs" @select="playSong" /><div v-if="!songs.length" class="empty-state">没有找到歌曲，试试其他关键词。</div><div class="live-pagination"><button :disabled="listPage === 1" @click="listPage--; loadSearch()">上一页</button><span>{{ listPage }} / {{ Math.max(1, Math.ceil(total / 20)) }}</span><button :disabled="listPage * 20 >= total" @click="listPage++; loadSearch()">下一页</button></div></template>
+
+        <template v-else-if="page === 'player'"><div v-if="current" class="player-stage"><div class="player-artwork"><div class="player-back-disc"></div><AlbumCover :track="current" size="player" show-title /></div><div class="player-content"><span class="eyebrow"><span class="live-dot"></span> NOW PLAYING</span><div class="player-meta"><span class="music-type">{{ current.category }} · {{ current.album }}</span><h1>{{ current.title }}</h1><p>{{ current.artist }}</p></div><div class="player-tags"><span v-if="current.vip"><Icon name="crown" :size="14" /> {{ isMember || isAdmin ? '会员完整播放' : '30 秒试听' }}</span><span>{{ current.duration }}</span></div><div class="live-player-controls"><button class="play-main" type="button" @click="togglePlayback"><Icon :name="playing ? 'pause' : 'play'" :size="24" /></button><input type="range" min="0" :max="playbackDuration" :value="progress" @input="seekAudio" /><span>{{ formatTime(progress) }} / {{ formatTime(playbackDuration) }}</span></div><div class="player-actions"><button type="button" @click="toggleFavorite(current)"><Icon name="heart" :size="18" /> {{ favoriteIds.has(current.id) ? '取消收藏' : '收藏歌曲' }}</button><select v-model="selectedPlaylist" @focus="loadPlaylists" @change="addToPlaylist"><option value="">加入歌单</option><option v-for="list in playlists" :key="list.id" :value="list.id">{{ list.name }}</option></select></div></div></div><div v-else class="empty-state">从曲库选择一首歌开始播放。</div><section v-if="current" class="live-comments"><div class="section-heading"><div><span class="eyebrow">LISTENER NOTES</span><h2>听众评论</h2></div></div><form class="live-inline-form" @submit.prevent="submitComment"><input v-model="commentText" maxlength="1000" placeholder="写下听这首歌时的心情…" /><button class="button button-accent" type="submit">发表评论</button></form><p class="live-note">评论经管理员审核后公开。</p><div v-for="comment in songComments" :key="comment.id" class="live-comment"><strong>{{ comment.display_name }}</strong><span>{{ comment.created_at }}</span><p>{{ comment.content }}</p></div></section></template>
+
+        <template v-else-if="page === 'recommend'"><section class="recommend-hero"><div><span class="eyebrow light">CURATED JUST FOR YOU</span><h1>每日推荐<span> / 01</span></h1><p>从你的收听足迹里，打捞今天的好心情。</p></div><div class="recommend-visual"><div class="recommend-circle c1"></div><div class="recommend-circle c2"></div><span>YOU<br />+<br />MUSIC</span></div></section><div class="chip-row"><button :class="{ selected: algorithm === 'TAG' }" @click="algorithm = 'TAG'">标签规则推荐</button><button :class="{ selected: algorithm === 'ITEM_CF' }" @click="algorithm = 'ITEM_CF'">协同过滤推荐</button></div><div class="section-heading"><div><span class="eyebrow">THE LIST</span><h2>今日为你精选</h2></div><span class="subtle-text">每天 06:00 更新</span></div><TrackTable :tracks="recommendations" @select="playSong" /><div v-if="!recommendations.length" class="empty-state">曲库暂无可推荐歌曲。</div></template>
+
+        <template v-else-if="page === 'ai'"><div class="ai-layout"><section class="ai-main"><div class="ai-heading"><span class="ai-avatar"><Icon name="spark" :size="25" /></span><div><span class="eyebrow">YOUR MUSIC COMPANION</span><h1>把心情，说给音乐听<span class="accent-dot">.</span></h1><p>可以连续追问，结果只来自本地曲库。</p></div></div><div class="live-chat-scroll"><div v-if="!messages.length" class="ai-welcome">描述一个场景、一种感觉，或一句模糊的记忆。<br />例如：“适合雨天独处的温柔中文歌”。</div><div v-for="msg in messages" :key="msg.id" class="chat-message" :class="msg.role === 'USER' ? 'user-message' : 'ai-message'"><template v-if="msg.role === 'ASSISTANT'"><span class="ai-message-icon"><Icon name="spark" :size="16" /></span><div><p>{{ msg.content }}</p><div v-if="msg.songs?.length" class="ai-results"><button v-for="song in msg.songs" :key="song.id" @click="playSong(song)"><AlbumCover :track="song" size="tiny" /><span><strong>{{ song.title }}</strong><small>{{ song.artist }}</small></span><Icon name="play" :size="17" /></button></div></div></template><template v-else>{{ msg.content }}</template></div></div><form class="chat-input" @submit.prevent="sendChat"><input v-model="chatText" maxlength="500" placeholder="继续描述你想听的音乐…" /><button type="submit" :disabled="busy"><Icon name="send" :size="18" /></button></form><p class="ai-disclaimer">由 DeepSeek 理解描述 · 由本地曲库返回结果</p></section><aside class="ai-side"><div class="ai-side-card"><span class="eyebrow">YOUR CONVERSATIONS</span><h3>对话记录</h3><button type="button" @click="conversationId = null; messages = []">+ 开始新对话</button><button v-for="item in conversations" :key="item.id" type="button" @click="openConversation(item.id)">{{ item.title }} <Icon name="chevron" :size="15" /></button></div></aside></div></template>
+
+        <template v-else-if="page === 'favorites'"><div class="page-intro"><span class="eyebrow">YOUR COLLECTION</span><h1>我的收藏<span class="accent-dot">.</span></h1><p>喜欢的音乐，永远有位置。</p></div><TrackTable :tracks="favorites" @select="playSong" /><div v-if="!favorites.length" class="empty-state">还没有收藏歌曲，去曲库发现第一首吧。</div></template>
+
+        <template v-else-if="page === 'playlists'"><div class="page-intro"><span class="eyebrow">MADE BY YOU</span><h1>我的歌单<span class="accent-dot">.</span></h1><p>把喜欢的声音，收进自己的故事里。</p></div><form class="live-inline-form" @submit.prevent="createPlaylist"><input v-model="playlistName" maxlength="100" placeholder="给新歌单起一个名字" /><button class="button button-accent" type="submit"><Icon name="plus" :size="18" /> 创建歌单</button></form><div class="live-playlist-grid"><button v-for="list in playlists" :key="list.id" class="live-playlist-card" @click="openPlaylist(list.id)"><span class="live-playlist-symbol">♫</span><strong>{{ list.name }}</strong><small>{{ list.song_count }} 首歌曲</small></button></div><section v-if="activePlaylist" class="live-playlist-detail"><div class="section-heading"><h2>{{ activePlaylist.name }}</h2><button class="text-link" @click="activePlaylist = null">关闭</button></div><form class="live-inline-form" @submit.prevent="renamePlaylist"><input v-model="playlistRename" maxlength="100" aria-label="歌单名称" /><button class="button button-accent" type="submit">重命名</button><button class="button live-delete" type="button" @click="deletePlaylist">删除歌单</button></form><div v-for="song in activePlaylist.songs" :key="song.id" class="live-playlist-row"><button @click="playSong(song)"><AlbumCover :track="song" size="tiny" />{{ song.title }} · {{ song.artist }}</button><button @click="removeFromPlaylist(song.id)">移除</button></div></section></template>
+
+        <template v-else-if="page === 'history'"><div class="page-intro"><span class="eyebrow">YOUR LISTENING JOURNEY</span><h1>播放历史<span class="accent-dot">.</span></h1><p>每一首，都曾陪你度过一个时刻。</p></div><TrackTable :tracks="history" show-date @select="playSong" /><div v-if="!history.length" class="empty-state">还没有播放记录。完整收听至少 10 秒后会保存。</div></template>
+
+        <template v-else-if="page === 'membership'"><section class="membership-hero"><div><span class="eyebrow light"><Icon name="crown" :size="17" /> SHENGYU PLUS</span><h1>让每一首喜欢的歌，<br /><em>都能完整抵达。</em></h1><p>解锁会员歌曲完整播放，音乐不必停在前奏。</p><div class="membership-status"><span class="status-signal"></span>{{ isMember ? '会员生效中' : '当前为普通用户' }}<span v-if="isMember"> · 有效期至 {{ String(user.membershipExpiresAt).slice(0, 10) }}</span></div></div><div class="member-mark"><span>声屿</span><strong>PLUS</strong><small>MEMBERSHIP</small></div></section><div class="section-heading"><div><span class="eyebrow">YOUR BENEFITS</span><h2>聆听特权</h2></div></div><div class="benefit-grid"><div><Icon name="disc" :size="28" /><strong>完整播放</strong><p>会员歌曲，从第一秒听到最后一秒。</p></div><div><Icon name="music" :size="28" /><strong>更多好歌</strong><p>探索曲库中的会员内容。</p></div><div><Icon name="headphones" :size="28" /><strong>有效期管理</strong><p>会员资格由管理员开通与续期。</p></div></div></template>
+
+        <template v-else-if="page === 'dashboard'"><div class="page-intro admin-intro"><span class="eyebrow">OVERVIEW</span><h1>数据概览<span class="accent-dot">.</span></h1><p>业务数据来自当前系统。</p></div><div v-if="dashboard" class="metric-grid"><div v-for="[label, value, icon] in [['累计用户', dashboard.users, 'users'], ['有效会员', dashboard.members, 'crown'], ['上架歌曲', dashboard.songs, 'music'], ['今日播放', dashboard.playsToday, 'headphones']]" :key="label" class="metric-card"><span>{{ label }} <Icon :name="icon" :size="19" /></span><strong>{{ value }}</strong></div></div><div class="dashboard-grid"><div class="dashboard-panel"><div class="panel-heading"><h3>热门歌曲</h3></div><div v-for="song in dashboard?.topSongs || []" :key="song.id" class="mini-track"><AlbumCover :track="songView(song)" size="tiny" /><div><strong>{{ song.title }}</strong><small>{{ song.artist }}</small></div><b>{{ song.play_count }} 次播放</b></div></div><div class="dashboard-panel experiment-panel"><div class="panel-heading"><h3>算法实验</h3></div><div v-for="item in dashboard?.experiments || []" :key="item.algorithm + item.created_at" class="live-experiment"><strong>{{ item.algorithm }}</strong><span>Precision@10: {{ Number(item.precision_at_10).toFixed(3) }}</span><span>Recall@10: {{ Number(item.recall_at_10).toFixed(3) }}</span></div><p v-if="!dashboard?.experiments?.length">尚未运行离线实验。</p><button class="outline-button" @click="evaluate">运行公开数据集实验</button><button class="outline-button" @click="rebuild">立即重算用户推荐</button></div></div></template>
+
+        <template v-else-if="page === 'members'"><div class="page-intro admin-intro"><span class="eyebrow">PEOPLE & MEMBERSHIP</span><h1>用户与会员<span class="accent-dot">.</span></h1><p>设置会员有效期并管理账号状态。</p></div><div class="admin-list-panel"><div class="panel-heading list-heading"><h3>用户列表 <sup>{{ adminTotal }}</sup></h3></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>用户</th><th>账号</th><th>角色</th><th>会员到期时间</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminUsers" :key="item.id"><td>{{ item.display_name }}</td><td>{{ item.username }}</td><td>{{ item.role }}</td><td><input v-model="membershipDraft[item.id]" type="datetime-local" class="table-input" :disabled="item.role === 'ADMIN'" /></td><td>{{ item.enabled ? '正常' : '禁用' }}</td><td><button class="table-action" :disabled="item.role === 'ADMIN'" @click="saveMembership(item)">保存会员</button><button class="table-action" :disabled="item.role === 'ADMIN'" @click="toggleUser(item)">{{ item.enabled ? '禁用' : '启用' }}</button></td></tr></tbody></table></div><div class="pagination"><span>共 {{ adminTotal }} 位用户</span><div><button @click="nextListPage(-1)">上一页</button><button @click="nextListPage(1)">下一页</button></div></div></div></template>
+
+        <template v-else-if="page === 'songs'"><div class="page-intro with-action admin-intro"><div><span class="eyebrow">MUSIC CATALOG</span><h1>歌曲管理<span class="accent-dot">.</span></h1><p>上传歌曲、编辑标签与上下架。</p></div><button class="button button-accent" @click="uploadOpen = true"><Icon name="upload" :size="18" /> 上传歌曲</button></div><div class="admin-list-panel"><div class="panel-heading list-heading"><h3>全部歌曲 <sup>{{ adminTotal }}</sup></h3></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>歌曲</th><th>专辑 / 风格</th><th>会员</th><th>播放量</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="song in adminSongs" :key="song.id"><td><span class="song-cell"><AlbumCover :track="song" size="tiny" /><span><strong>{{ song.title }}</strong><small>{{ song.artist }}</small></span></span></td><td>{{ song.album }} / {{ song.category }}</td><td>{{ song.vip ? 'VIP' : '免费' }}</td><td>{{ song.plays }}</td><td>{{ song.published ? '已上架' : '已下架' }}</td><td><button class="table-action" @click="openSongEdit(song)">编辑</button><button class="table-action" @click="togglePublished(song)">{{ song.published ? '下架' : '上架' }}</button></td></tr></tbody></table></div><div class="pagination"><span>共 {{ adminTotal }} 首歌曲</span><div><button @click="nextListPage(-1)">上一页</button><button @click="nextListPage(1)">下一页</button></div></div></div></template>
+
+        <template v-else-if="page === 'comments'"><div class="page-intro admin-intro"><span class="eyebrow">COMMUNITY VOICES</span><h1>评论管理<span class="accent-dot">.</span></h1><p>审核听众的音乐分享。</p></div><div class="comment-list"><div v-for="item in adminComments" :key="item.id" class="comment-card"><span class="list-avatar avatar-peach">{{ item.display_name?.slice(0, 1) }}</span><div class="comment-body"><div class="comment-meta"><strong>{{ item.display_name }}</strong><span>评论《{{ item.song_title }}》</span><span>{{ item.created_at }}</span></div><p>{{ item.content }}</p><span class="status-pill" :class="item.status === 'APPROVED' ? 'success' : 'pending'">{{ item.status }}</span></div><div class="comment-actions"><button @click="moderate(item, 'APPROVED')">通过</button><button @click="moderate(item, 'HIDDEN')">隐藏</button></div></div></div><div class="live-pagination"><button @click="nextListPage(-1)">上一页</button><span>第 {{ listPage }} 页 · 共 {{ adminTotal }} 条</span><button @click="nextListPage(1)">下一页</button></div></template>
+      </main>
+      <footer class="footer-player"><div class="footer-track"><AlbumCover :track="current || { title: '声屿音乐', tone: 'cover-sunset' }" size="tiny" /><div><strong>{{ current?.title || '尚未播放' }}</strong><small>{{ current?.artist || '去发现一首好歌' }}</small></div></div><div class="footer-center"><div class="footer-controls"><button class="footer-play" type="button" @click="togglePlayback"><Icon :name="playing ? 'pause' : 'play'" :size="17" /></button></div><div class="footer-progress"><span>{{ Math.floor(progress / 60).toString().padStart(2, '0') }}:{{ (Math.floor(progress) % 60).toString().padStart(2, '0') }}</span><div><i :style="{ width: audioElement?.duration ? `${progress / audioElement.duration * 100}%` : '0%' }"></i></div><span>{{ formatTime(playbackDuration) }}</span></div></div><div class="footer-tools"><button @click="navigate('player')"><Icon name="disc" :size="20" /></button></div></footer>
+    </div>
+
+    <div v-if="loginOpen" class="live-modal-backdrop" @click.self="loginOpen = false"><form class="live-modal auth-modal" @submit.prevent="login"><button class="modal-close" type="button" @click="loginOpen = false">×</button><span class="eyebrow">WELCOME TO SHENGYU</span><h2>{{ authMode === 'login' ? '再次相遇，好音乐。' : '开始你的音乐旅程。' }}</h2><label>用户名<input v-model="loginName" required minlength="3" maxlength="30" autocomplete="username" /></label><label v-if="authMode === 'register'">昵称<input v-model="registerName" maxlength="80" /></label><label>密码<input v-model="loginPassword" required type="password" minlength="8" :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'" /></label><button class="button button-accent" type="submit" :disabled="busy">{{ authMode === 'login' ? '登录' : '注册' }}</button><button class="auth-switch" type="button" @click="authMode = authMode === 'login' ? 'register' : 'login'">{{ authMode === 'login' ? '没有账号？立即注册' : '已有账号？返回登录' }}</button></form></div>
+    <div v-if="uploadOpen" class="live-modal-backdrop" @click.self="uploadOpen = false"><form class="live-modal" @submit.prevent="uploadSong"><button class="modal-close" type="button" @click="uploadOpen = false">×</button><span class="eyebrow">MUSIC CATALOG</span><h2>上传新歌曲</h2><div class="form-grid"><label>歌名<input v-model="uploadForm.title" required maxlength="200" /></label><label>歌手<input v-model="uploadForm.artist" required maxlength="200" /></label><label>专辑<input v-model="uploadForm.album" /></label><label>语言<select v-model="uploadForm.language"><option value="cn">中文</option><option value="en">英文</option><option value="jp">日文</option><option value="fr">法文</option><option value="ru">俄文</option></select></label><label>风格<input v-model="uploadForm.genre" /></label><label>标签，逗号分隔<input v-model="uploadForm.tags" /></label><label>MP3 音频<input type="file" accept=".mp3,audio/mpeg" required @change="uploadForm.audio = $event.target.files[0]" /></label><label>封面<input type="file" accept=".jpg,.jpeg,.png,.webp,image/*" @change="uploadForm.cover = $event.target.files[0]" /></label></div><label class="checkbox-line"><input v-model="uploadForm.vip" type="checkbox" /> 会员歌曲（需要 FFmpeg 生成试听文件）</label><button class="button button-accent" type="submit" :disabled="busy">保存歌曲</button></form></div>
+    <div v-if="songEdit" class="live-modal-backdrop" @click.self="songEdit = null"><form class="live-modal" @submit.prevent="saveSong"><button class="modal-close" type="button" @click="songEdit = null">×</button><span class="eyebrow">EDIT TRACK</span><h2>编辑歌曲</h2><div class="form-grid"><label>歌名<input v-model="songEdit.title" required /></label><label>歌手<input v-model="songEdit.artist" required /></label><label>专辑<input v-model="songEdit.album" /></label><label>风格<input v-model="songEdit.category" /></label><label>标签，逗号分隔<input v-model="songEdit.tagsText" /></label><label>描述<input v-model="songEdit.description" /></label></div><label class="checkbox-line"><input v-model="songEdit.vip" type="checkbox" /> 会员歌曲</label><label class="checkbox-line"><input v-model="songEdit.published" type="checkbox" /> 已上架</label><button class="button button-accent" type="submit" :disabled="busy">保存修改</button></form></div>
+    <div v-if="toast" class="toast-message">{{ toast }}</div>
+  </div>
+</template>

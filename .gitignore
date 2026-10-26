@@ -1,0 +1,9 @@
+.npm-cache/
+.chrome-preview/
+.m2repo/
+.env
+tools/ffmpeg-download/
+tools/ffmpeg/
+data/*.zip
+/music/
+/img/
