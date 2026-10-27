@@ -8,6 +8,6 @@
 
 `song-genres.json` 按 `sourcePath` 对应 `songs.source_path`，记录当前有效歌曲的语言、归一化曲风 `genre`、中文名称 `genreName`、细分类 `styles`、匹配状态和证据。`evidence.rawGenre` 保存 Apple 原始 `primaryGenreName`，`evidence.trackUrl` 可用于人工核对。`matched` 代表曲名与歌手通过自动匹配，`review` 代表缺少可靠匹配或曲风无法归一化，`search_error` 代表检索失败。待复核歌曲的 `genre` 保持 `null`，不按语言猜测曲风。
 
-本次对 461 首有效本地素材完成检索：403 首为 `matched`，58 首为 `review`。JSON 是离线分类资料，尚未写入 MySQL 的 `songs.genre` 或 `song_tags`；这样可以先复核曲风与版本，再决定正式标签。
+本次对 461 首有效本地素材完成检索：403 首为 `matched`，58 首为 `review`。后端启动时读取此 JSON，将 `matched` 记录的归一化曲风同步到 `songs.genre`，仅更新当前仍为“未分类”且 `source_path` 匹配的歌曲，不覆盖管理员手工设置。`review` 记录保留为“未分类”；`styles` 暂未导入 `song_tags`。直接从 IDEA 启动时可设置 `MUSIC_GENRE_CATALOG_PATH` 指向本文件；默认路径为后端工作目录的 `../data/song-genres.json`。
 
 分类脚本为 `node tools/classify-genres.mjs`；支持 `--limit=5` 抽样、`--retry-review` 重新检索待复核歌曲，以及 `--renormalize` 不联网重算原始曲风。完成后执行 `node tools/validate-song-genres.mjs` 核对有效素材、重复路径和来源字段。脚本按 [Apple Search API 公开说明](https://performance-partners.apple.com/search-api) 控制约每分钟 20 次请求，处理过程中定期保存 JSON，可中断后续跑。`zh-variants.json` 为简繁字形映射，用于核对中文曲名与歌手；它本身不提供曲风。曲风字段属于平台目录分类，可能无法反映歌曲的全部音乐特征，后续导入 `song_tags` 前应先人工审查 `review` 和低置信度记录。

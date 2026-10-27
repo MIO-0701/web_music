@@ -20,6 +20,7 @@ spring:
       pool:
         size: 2
 music:
+  genre-catalog-path: ${MUSIC_GENRE_CATALOG_PATH:../data/song-genres.json}
   cors-origin: ${CORS_ORIGIN:http://localhost:5173}
   admin:
     username: ${ADMIN_USERNAME:}

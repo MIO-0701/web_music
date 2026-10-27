@@ -19,7 +19,8 @@
 
 | 方法与路径 | 权限 | 作用及主要参数 |
 | --- | --- | --- |
-| `GET /api/songs` | 公开 | 已上架曲库检索。可选 `keyword`（歌名、歌手、专辑模糊搜索）、`genre`、`language`（当前素材使用 `cn/en/fr/jp/ru`）、`page`、`size`。 |
+| `GET /api/songs` | 公开 | 已上架曲库检索。可选 `keyword`（歌名、歌手、专辑模糊搜索）、`genre`、`language`（当前素材使用 `cn/en/fr/jp/ru`）、`vip=true/false`、`page`、`size`。 |
+| `GET /api/songs/genres` | 公开 | 返回已上架歌曲的非空曲风及对应 `song_count`，供前端风格筛选使用。 |
 | `GET /api/songs/hot` | 公开 | 获取按播放量排序的前 12 首已上架歌曲；Redis 缓存 10 分钟，播放和管理变更时主动失效。 |
 | `GET /api/songs/{id}` | 公开 | 已上架歌曲详情，含 `tags`、`coverUrl`、`audioUrl`。已下架返回 404。 |
 | `GET /api/songs/{id}/cover` | 公开 | 返回封面二进制；无封面或已下架返回 404。 |
@@ -33,10 +34,10 @@
 
 | 方法与路径 | 权限 | 作用及主要参数 |
 | --- | --- | --- |
-| `GET /api/me/favorites` | 登录 | 分页查看已收藏且仍上架的歌曲；支持 `page`、`size`。 |
+| `GET /api/me/favorites` | 登录 | 分页查看已收藏且仍上架的歌曲；支持 `keyword`（歌名、歌手、专辑）、`page`、`size`。 |
 | `POST /api/me/favorites/{songId}` | 登录 | 收藏已上架歌曲，重复操作幂等。 |
 | `DELETE /api/me/favorites/{songId}` | 登录 | 取消收藏，重复操作幂等。 |
-| `GET /api/me/playlists` | 登录 | 查看自己的歌单及 `song_count`。 |
+| `GET /api/me/playlists` | 登录 | 查看自己的歌单及 `song_count`、封面歌曲 ID `cover_song_id`。 |
 | `POST /api/me/playlists` | 登录 | 创建歌单，JSON：`{"name":"夜间散步"}`，返回新歌单 `id`。 |
 | `GET /api/me/playlists/{id}` | 登录 | 查看自己的歌单及其中已上架歌曲；其他人的歌单返回 404。 |
 | `PUT /api/me/playlists/{id}` | 登录 | 重命名自己的歌单，JSON：`{"name":"新名称"}`。 |
@@ -44,7 +45,7 @@
 | `POST /api/me/playlists/{id}/songs/{songId}` | 登录 | 将已上架歌曲加入自己的歌单，重复操作幂等。 |
 | `DELETE /api/me/playlists/{id}/songs/{songId}` | 登录 | 从自己的歌单移除歌曲，重复操作幂等。 |
 | `POST /api/me/play-events` | 登录 | 记录播放，JSON：`{"songId":1,"secondsPlayed":20,"completed":false}`。时长为 10–7200 秒，不能超过可播放范围约 3 秒；同一用户与歌曲 30 秒内去重。 |
-| `GET /api/me/history` | 登录 | 分页读取自己的播放事件，支持 `page`、`size`。 |
+| `GET /api/me/history` | 登录 | 分页读取播放历史；每首已上架歌曲只显示最近一次播放记录，支持 `page`、`size`。 |
 
 ## 推荐与 AI 查歌
 

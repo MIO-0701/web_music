@@ -21,9 +21,11 @@ public class CatalogController {
 
     @GetMapping public PageResult<Map<String, Object>> search(@RequestParam(required = false) String keyword,
         @RequestParam(required = false) String genre, @RequestParam(required = false) String language,
+        @RequestParam(required = false) Boolean vip,
         @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
-        return catalog.search(keyword, genre, language, page, size, false);
+        return catalog.search(keyword, genre, language, vip, page, size, false);
     }
+    @GetMapping("/genres") public List<Map<String, Object>> genres() { return catalog.genres(); }
     @GetMapping("/hot") public List<Map<String, Object>> hot() { return catalog.hot(); }
     @GetMapping("/{id}") public Map<String, Object> song(@PathVariable long id) { return catalog.song(id, false); }
 

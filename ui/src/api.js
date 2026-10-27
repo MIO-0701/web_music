@@ -42,6 +42,7 @@ export function queryString(params) {
 }
 
 const tones = ['cover-sunset', 'cover-sea', 'cover-night', 'cover-orange', 'cover-green', 'cover-cloud', 'cover-light', 'cover-space']
+export const genreNames = { pop: '流行', rock: '摇滚', alternative: '另类', 'rnb-soul': 'R&B / 灵魂', 'hip-hop': '嘻哈 / 说唱', anime: '动漫音乐', soundtrack: '原声 / 配乐', jazz: '爵士', 'singer-songwriter': '唱作', instrumental: '器乐', 'new-age': '新世纪' }
 export function songView(row) {
   const id = Number(row.id ?? row.song_id)
   const duration = Number(row.duration_seconds ?? (row.duration ? Number(row.duration.split(':')[0]) * 60 + Number(row.duration.split(':')[1]) : 0))
@@ -51,6 +52,7 @@ export function songView(row) {
     artist: row.artist,
     album: row.album_name || row.album || '未知专辑',
     category: row.genre || row.category || '未分类',
+    genreName: genreNames[row.genre || row.category] || row.genre || row.category || '未分类',
     duration: `${String(Math.floor(duration / 60)).padStart(2, '0')}:${String(duration % 60).padStart(2, '0')}`,
     tone: row.tone || tones[id % tones.length],
     vip: !!row.vip,

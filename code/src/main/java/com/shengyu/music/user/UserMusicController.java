@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,10 +32,19 @@ public class UserMusicController {
         this.jdbc = jdbc; this.named = named; this.redis = redis; this.catalog = catalog;
     }
 
-    @GetMapping("/favorites") public PageResult<Map<String, Object>> favorites(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
+    @GetMapping("/favorites") public PageResult<Map<String, Object>> favorites(@RequestParam(required = false) String keyword,
+        @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
         long user = AuthService.current().id(); int p = PageResult.safePage(page), s = PageResult.safeSize(size);
-        long total = jdbc.queryForObject("SELECT COUNT(*) FROM favorites f JOIN songs s ON s.id=f.song_id WHERE f.user_id=? AND s.published=TRUE", Long.class, user);
-        var rows = jdbc.queryForList("SELECT s.id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip,s.play_count,f.created_at FROM favorites f JOIN songs s ON s.id=f.song_id WHERE f.user_id=? AND s.published=TRUE ORDER BY f.created_at DESC LIMIT ? OFFSET ?", user, s, (p - 1) * s);
+        String where = " FROM favorites f JOIN songs s ON s.id=f.song_id WHERE f.user_id=? AND s.published=TRUE";
+        var args = new ArrayList<Object>(); args.add(user);
+        if (keyword != null && !keyword.isBlank()) {
+            where += " AND (s.title LIKE ? OR s.artist LIKE ? OR s.album_name LIKE ?)";
+            String term = "%" + keyword.trim() + "%";
+            args.add(term); args.add(term); args.add(term);
+        }
+        long total = jdbc.queryForObject("SELECT COUNT(*)" + where, Long.class, args.toArray());
+        args.add(s); args.add((p - 1) * s);
+        var rows = jdbc.queryForList("SELECT s.id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip,s.play_count,f.created_at" + where + " ORDER BY f.created_at DESC,s.id DESC LIMIT ? OFFSET ?", args.toArray());
         rows.forEach(row -> row.put("coverUrl", "/api/songs/" + row.get("id") + "/cover"));
         return new PageResult<>(rows, total, p, s);
     }
@@ -51,7 +61,9 @@ public class UserMusicController {
 
     public record PlaylistRequest(@NotBlank @Size(max = 100) String name) {}
     @GetMapping("/playlists") public List<Map<String, Object>> playlists() {
-        return jdbc.queryForList("SELECT p.id,p.name,p.created_at,COUNT(ps.song_id) song_count FROM playlists p LEFT JOIN playlist_songs ps ON ps.playlist_id=p.id WHERE p.user_id=? GROUP BY p.id,p.name,p.created_at ORDER BY p.id DESC", AuthService.current().id());
+        return jdbc.queryForList("SELECT p.id,p.name,p.created_at,COUNT(visible.id) song_count," +
+            "(SELECT ps2.song_id FROM playlist_songs ps2 JOIN songs s2 ON s2.id=ps2.song_id AND s2.published=TRUE WHERE ps2.playlist_id=p.id ORDER BY ps2.added_at DESC,ps2.song_id DESC LIMIT 1) cover_song_id " +
+            "FROM playlists p LEFT JOIN playlist_songs ps ON ps.playlist_id=p.id LEFT JOIN songs visible ON visible.id=ps.song_id AND visible.published=TRUE WHERE p.user_id=? GROUP BY p.id,p.name,p.created_at ORDER BY p.id DESC", AuthService.current().id());
     }
     @PostMapping("/playlists") public Map<String, Object> createPlaylist(@Valid @RequestBody PlaylistRequest body) {
         var keys = new GeneratedKeyHolder();
@@ -100,8 +112,11 @@ public class UserMusicController {
     }
     @GetMapping("/history") public PageResult<Map<String, Object>> history(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
         long user = AuthService.current().id(); int p = PageResult.safePage(page), s = PageResult.safeSize(size);
-        long total = jdbc.queryForObject("SELECT COUNT(*) FROM play_events WHERE user_id=?", Long.class, user);
-        var rows = jdbc.queryForList("SELECT e.id event_id,e.seconds_played,e.completed,e.created_at,s.id song_id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip FROM play_events e JOIN songs s ON s.id=e.song_id WHERE e.user_id=? ORDER BY e.id DESC LIMIT ? OFFSET ?", user, s, (p - 1) * s);
+        long total = jdbc.queryForObject("SELECT COUNT(DISTINCT e.song_id) FROM play_events e JOIN songs s ON s.id=e.song_id WHERE e.user_id=? AND s.published=TRUE", Long.class, user);
+        var rows = jdbc.queryForList("SELECT e.id event_id,e.seconds_played,e.completed,e.created_at,s.id song_id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip " +
+            "FROM (SELECT song_id,MAX(id) latest_id FROM play_events WHERE user_id=? GROUP BY song_id) latest " +
+            "JOIN play_events e ON e.id=latest.latest_id JOIN songs s ON s.id=e.song_id AND s.published=TRUE " +
+            "ORDER BY e.id DESC LIMIT ? OFFSET ?", user, s, (p - 1) * s);
         rows.forEach(row -> row.put("coverUrl", "/api/songs/" + row.get("song_id") + "/cover"));
         return new PageResult<>(rows, total, p, s);
     }

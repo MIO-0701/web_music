@@ -62,6 +62,7 @@ services:
       MUSIC_DIR: /data/music
       IMAGE_DIR: /data/img
       MUSIC_EXPERIMENT_DATASET_PATH: /data/experiment/hetrec2011-lastfm-2k.zip
+      MUSIC_GENRE_CATALOG_PATH: /data/experiment/song-genres.json
       CORS_ORIGIN: http://localhost:5173
     ports:
       - "8080:8080"

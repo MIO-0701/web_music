@@ -17,17 +17,22 @@ public class CatalogService {
     private final ObjectMapper json;
     public CatalogService(JdbcTemplate jdbc, StringRedisTemplate redis, ObjectMapper json) { this.jdbc = jdbc; this.redis = redis; this.json = json; }
 
-    public PageResult<Map<String, Object>> search(String keyword, String genre, String language, int page, int size, boolean admin) {
+    public PageResult<Map<String, Object>> search(String keyword, String genre, String language, Boolean vip, int page, int size, boolean admin) {
         int p = PageResult.safePage(page), s = PageResult.safeSize(size);
         StringBuilder where = new StringBuilder(admin ? " WHERE 1=1" : " WHERE published=TRUE");
         List<Object> args = new ArrayList<>();
         if (keyword != null && !keyword.isBlank()) { where.append(" AND (title LIKE ? OR artist LIKE ? OR album_name LIKE ?)"); String term = "%" + keyword.trim() + "%"; args.add(term); args.add(term); args.add(term); }
         if (genre != null && !genre.isBlank()) { where.append(" AND genre=?"); args.add(genre); }
         if (language != null && !language.isBlank()) { where.append(" AND language_code=?"); args.add(language); }
+        if (vip != null) { where.append(" AND vip=?"); args.add(vip); }
         long total = jdbc.queryForObject("SELECT COUNT(*) FROM songs" + where, Long.class, args.toArray());
         List<Object> queryArgs = new ArrayList<>(args); queryArgs.add(s); queryArgs.add((p - 1) * s);
         var rows = jdbc.queryForList("SELECT id,title,artist,album_name,language_code,genre,description,duration_seconds,vip,published,play_count,created_at FROM songs" + where + " ORDER BY id DESC LIMIT ? OFFSET ?", queryArgs.toArray());
         return new PageResult<>(rows.stream().map(this::publicSong).toList(), total, p, s);
+    }
+
+    public List<Map<String, Object>> genres() {
+        return jdbc.queryForList("SELECT genre,COUNT(*) song_count FROM songs WHERE published=TRUE AND genre<>'' AND genre<>'未分类' GROUP BY genre ORDER BY song_count DESC,genre");
     }
 
     public Map<String, Object> song(long id, boolean admin) {

@@ -19,7 +19,7 @@ public class CatalogAdminController {
 
     @GetMapping public PageResult<Map<String, Object>> list(@RequestParam(required = false) String keyword,
         @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
-        return catalog.search(keyword, null, null, page, size, true);
+        return catalog.search(keyword, null, null, null, page, size, true);
     }
 
     @GetMapping("/{id}") public Map<String, Object> detail(@PathVariable long id) { return catalog.song(id, true); }
