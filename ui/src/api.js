@@ -15,12 +15,20 @@ export async function request(path, options = {}) {
   if (body && !(body instanceof FormData)) headers['Content-Type'] = 'application/json'
   let response
   try { response = await fetch(`${BASE}${path}`, { ...options, body, headers }) }
-  catch { throw new Error('无法连接后端服务，请检查 Docker 与 Spring Boot 是否启动') }
+  catch (error) {
+    if (error.name === 'AbortError') throw error
+    throw new Error('无法连接后端服务，请检查 Docker 与 Spring Boot 是否启动')
+  }
   if (!response.ok) {
     let message = `请求失败（${response.status}）`
     try { message = (await response.json()).error || message } catch { /* no JSON body */ }
-    if (response.status === 401) setToken('')
-    throw new Error(message)
+    if (response.status === 401 && token) {
+      setToken('')
+      window.dispatchEvent(new Event('shengyu:auth-expired'))
+    }
+    const error = new Error(message)
+    error.status = response.status
+    throw error
   }
   if (options.raw) return response
   if (response.status === 204) return null
