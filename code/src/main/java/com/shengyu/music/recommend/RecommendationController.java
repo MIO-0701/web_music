@@ -14,6 +14,9 @@ public class RecommendationController {
     @GetMapping("/api/me/recommendations") public List<Map<String, Object>> mine(@RequestParam(defaultValue = "TAG") String algorithm) {
         return recommendations.mine(algorithm.toUpperCase());
     }
+    @GetMapping("/api/me/recommendations/daily") public List<Map<String, Object>> daily() {
+        return recommendations.dailyForCurrentUser();
+    }
     @PostMapping("/api/admin/recommendations/rebuild") public Map<String, Object> rebuild() {
         return Map.of("usersProcessed", recommendations.rebuild());
     }

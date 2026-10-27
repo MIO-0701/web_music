@@ -32,7 +32,7 @@ JDK 21 + Spring Boot 3.5，提供曲库、会员、播放记录、歌单、评�
 | 曲库 | `GET /api/songs`、`GET /api/songs/hot`、`GET /api/songs/{id}`、`GET /api/songs/{id}/cover`、`GET /api/songs/{id}/audio` |
 | 用户 | `GET/POST/DELETE /api/me/favorites`、`/api/me/playlists`、`GET /api/me/history`、`POST /api/me/play-events` |
 | 评论 | `GET/POST /api/songs/{id}/comments` |
-| 推荐 | `GET /api/me/recommendations?algorithm=TAG\|ITEM_CF` |
+| 推荐 | `GET /api/me/recommendations/daily`；实验比较：`GET /api/me/recommendations?algorithm=TAG\|ITEM_CF` |
 | AI | `POST /api/me/ai/chat`、`GET /api/me/ai/conversations`、`GET /api/me/ai/conversations/{id}/messages` |
 | 管理 | `/api/admin/users`、`/api/admin/songs`、`/api/admin/comments`、`/api/admin/dashboard`、`POST /api/admin/recommendations/rebuild` |
 

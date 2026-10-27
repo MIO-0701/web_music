@@ -35,6 +35,8 @@ export function useAudioPlayer() {
     controller?.abort()
     controller = new AbortController()
     audioElement.value?.pause()
+    audioElement.value?.removeAttribute('src')
+    audioElement.value?.load()
     if (audioUrl.value) URL.revokeObjectURL(audioUrl.value)
     audioUrl.value = ''
     current.value = track
@@ -48,12 +50,13 @@ export function useAudioPlayer() {
       const response = await request(`/songs/${track.id}/audio`, { raw: true, signal: controller.signal })
       const blob = await response.blob()
       if (id !== selection) return false
+      if (!blob.size || !/audio\//i.test(response.headers.get('Content-Type') || '')) throw new Error('音频文件响应无效，请检查后端服务')
       audioUrl.value = URL.createObjectURL(blob)
       await nextTick()
       if (id !== selection) return false
       audioElement.value?.load()
       try { await audioElement.value?.play() }
-      catch { /* Browser autoplay restrictions leave the manual play button available. */ }
+      catch (error) { if (id === selection && error.name !== 'NotAllowedError' && error.name !== 'AbortError') playbackError.value = '音频无法播放，请重试' }
       return true
     } catch (error) {
       if (id === selection && error.name !== 'AbortError') playbackError.value = error.message
@@ -65,7 +68,7 @@ export function useAudioPlayer() {
 
   function toggle() {
     if (!audioElement.value || !audioUrl.value) return
-    if (audioElement.value.paused) audioElement.value.play().catch(() => { playbackError.value = '无法播放音频，请重试' })
+    if (audioElement.value.paused) audioElement.value.play().then(() => { playbackError.value = '' }).catch(() => { playbackError.value = '无法播放音频，请重试' })
     else audioElement.value.pause()
   }
 
@@ -85,6 +88,9 @@ export function useAudioPlayer() {
   }
 
   function onEnded() { playing.value = false }
+  function onError() {
+    if (audioUrl.value && audioElement.value?.currentSrc === audioUrl.value) playbackError.value = '音频无法播放，请重试'
+  }
   onUnmounted(stop)
-  return { current, audioElement, audioUrl, playing, loading, playbackError, progress, playbackDuration, load, stop, toggle, seek, onTimeUpdate, onEnded }
+  return { current, audioElement, audioUrl, playing, loading, playbackError, progress, playbackDuration, load, stop, toggle, seek, onTimeUpdate, onEnded, onError }
 }

@@ -6,6 +6,8 @@ import com.shengyu.music.auth.AuthService;
 import com.shengyu.music.common.ApiException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
@@ -32,6 +34,48 @@ public class RecommendationService {
         var rows = jdbc.queryForList("SELECT s.id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip,r.score,r.reason,r.generated_at FROM recommendations r JOIN songs s ON s.id=r.song_id WHERE r.user_id=? AND r.algorithm=? AND s.published=TRUE ORDER BY r.score DESC,s.id LIMIT 20", user, algorithm);
         if (rows.isEmpty()) {
             rows = jdbc.queryForList("SELECT id,title,artist,album_name,genre,duration_seconds,vip,play_count score,'当前热门歌曲' reason FROM songs WHERE published=TRUE ORDER BY play_count DESC,id DESC LIMIT 20");
+        }
+        rows.forEach(row -> row.put("coverUrl", "/api/songs/" + row.get("id") + "/cover"));
+        try { redis.opsForValue().set(key, json.writeValueAsString(rows), 20, TimeUnit.MINUTES); } catch (Exception ignored) { }
+        return rows;
+    }
+
+    /** Today's single user-facing list uses only yesterday's listening signals. */
+    public List<Map<String, Object>> dailyForCurrentUser() {
+        long user = AuthService.current().id();
+        String key = "recommend:daily:" + user + ":" + LocalDate.now(ZoneId.of("Asia/Shanghai"));
+        try { String cached = redis.opsForValue().get(key); if (cached != null) return json.readValue(cached, new TypeReference<>() {}); } catch (Exception ignored) { }
+        var yesterday = jdbc.query("SELECT song_id,SUM(weight) weight FROM (" +
+            "SELECT song_id,LEAST(COUNT(*),5)*1.0 weight FROM play_events WHERE user_id=? AND seconds_played>=10 AND created_at>=CURDATE()-INTERVAL 1 DAY AND created_at<CURDATE() GROUP BY song_id " +
+            "UNION ALL SELECT song_id,3.0 weight FROM favorites WHERE user_id=? AND created_at>=CURDATE()-INTERVAL 1 DAY AND created_at<CURDATE()) x GROUP BY song_id",
+            (rs, row) -> new RecommendationEngine.Interaction(user, rs.getLong("song_id"), rs.getDouble("weight")), user, user);
+        List<Map<String, Object>> rows;
+        if (yesterday.isEmpty()) {
+            rows = jdbc.queryForList("SELECT s.id,s.title,s.artist,s.album_name,s.genre,s.language_code,s.duration_seconds,s.vip," +
+                "COALESCE(h.plays,0) score,'昨日热门歌曲' reason FROM songs s LEFT JOIN " +
+                "(SELECT song_id,COUNT(*) plays FROM play_events WHERE created_at>=CURDATE()-INTERVAL 1 DAY AND created_at<CURDATE() GROUP BY song_id) h ON h.song_id=s.id " +
+                "WHERE s.published=TRUE ORDER BY score DESC,s.play_count DESC,s.id DESC LIMIT 20");
+        } else {
+            var catalog = jdbc.queryForList("SELECT id,title,artist,album_name,genre,language_code,duration_seconds,vip,play_count FROM songs WHERE published=TRUE");
+            Set<Long> candidates = new HashSet<>();
+            Map<Long, Set<String>> tags = new HashMap<>();
+            Map<Long, Double> popularity = new HashMap<>();
+            Map<Long, Map<String, Object>> byId = new HashMap<>();
+            for (var song : catalog) {
+                long id = ((Number) song.get("id")).longValue();
+                candidates.add(id); byId.put(id, song);
+                tags.put(id, new HashSet<>(List.of("genre:" + song.get("genre"), "language:" + song.get("language_code"))));
+                popularity.put(id, ((Number) song.get("play_count")).doubleValue());
+            }
+            jdbc.queryForList("SELECT l.song_id,t.name FROM song_tag_links l JOIN song_tags t ON t.id=l.tag_id JOIN songs s ON s.id=l.song_id WHERE s.published=TRUE")
+                .forEach(row -> tags.get(((Number) row.get("song_id")).longValue()).add("tag:" + row.get("name")));
+            rows = new ArrayList<>();
+            for (var ranked : RecommendationEngine.byTags(user, candidates, yesterday, tags, popularity, 20)) {
+                var song = new LinkedHashMap<>(byId.get(ranked.itemId()));
+                song.put("score", ranked.score());
+                song.put("reason", ranked.reason().startsWith("符合") ? "符合你昨日收听的语言和曲风" : "昨日习惯探索");
+                rows.add(song);
+            }
         }
         rows.forEach(row -> row.put("coverUrl", "/api/songs/" + row.get("id") + "/cover"));
         try { redis.opsForValue().set(key, json.writeValueAsString(rows), 20, TimeUnit.MINUTES); } catch (Exception ignored) { }

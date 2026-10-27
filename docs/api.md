@@ -51,6 +51,7 @@
 | 方法与路径 | 权限 | 作用及主要参数 |
 | --- | --- | --- |
 | `GET /api/me/recommendations?algorithm=TAG` | 登录 | 标签规则推荐；也可传 `ITEM_CF` 获取隐式反馈协同过滤推荐。返回歌曲数组，含 `score`、`reason`；新用户返回热门歌曲。 |
+| `GET /api/me/recommendations/daily` | 登录 | 前端每日推荐统一入口。昨日有至少 10 秒播放或新增收藏时，按昨日歌曲的语言、曲风和标签推荐未听过的已上架歌曲；否则按全站昨日播放次数推荐，播放数相同时按累计热度排序。返回最多 20 首，含 `score`、`reason`。 |
 | `POST /api/me/ai/chat` | 登录 | 自然语言查歌。JSON：`{"conversationId":null,"message":"找几首日语歌"}`；追问时填写返回的 `conversationId`。返回 `conversationId`、`reply`、`conditions` 与本地上架歌曲 `songs`。每用户每天最多 30 次。 |
 | `GET /api/me/ai/conversations` | 登录 | 最近 50 个会话，按更新时间倒序。 |
 | `GET /api/me/ai/conversations/{id}/messages` | 登录 | 自己的会话消息，含解析条件、歌曲 ID、状态；其他人的会话返回 404。 |
@@ -78,12 +79,9 @@ AI 接口需要配置 `DEEPSEEK_API_KEY`。未配置时 `POST /api/me/ai/chat` �
 
 上传大小上限：音频单文件 50 MB、整个请求 60 MB。VIP 上传或将普通歌曲改为 VIP 需要后端运行环境有 FFmpeg。用户在写权限用例时，可分别使用未登录、普通用户、有效会员和管理员令牌。
 
-## 最短调用示例
+## 公开接口调用示例
 
 ```powershell
 $base = 'http://localhost:8080'
-$login = Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' -Body '{"username":"admin","password":"<本机管理员密码>"}'
-$headers = @{ Authorization = "Bearer $($login.token)" }
-Invoke-RestMethod "$base/api/admin/dashboard" -Headers $headers
 Invoke-RestMethod "$base/api/songs?language=cn&page=1&size=5"
 ```
