@@ -7,6 +7,7 @@ const manifestPath = path.join(root, 'img', '_cover-manifest.json')
 const outputPath = path.join(root, 'data', 'song-genres.json')
 const maxSongs = Number(process.argv.find(arg => arg.startsWith('--limit='))?.slice(8) || 0)
 const retryReview = process.argv.includes('--retry-review')
+const retryUnlisted = process.argv.includes('--retry-unlisted')
 const zhVariants = JSON.parse(fs.readFileSync(path.join(root, 'data', 'zh-variants.json'), 'utf8'))
 const delayMs = 3200 // Apple's public Search API documents approximately 20 calls/minute.
 const store = { cn: 'HK', en: 'US', fr: 'FR', jp: 'JP', ru: 'US' }
@@ -42,6 +43,8 @@ function artistSimilarity(expected, actual, chinese = false) {
   if (expectedName.length >= 2 && actualName.includes(expectedName)) return 1
   const whole = similarity(expected, actual, chinese)
   const parts = String(expected).split(/[&、，,\/]/u).map(x => x.trim()).filter(Boolean)
+  const latinAlias = String(expected).match(/^[A-Za-z][A-Za-z.\s]{1,8}(?=[\p{Script=Han}])/u)?.[0]?.trim()
+  if (latinAlias && normal(latinAlias).length >= 3 && normal(actual).includes(normal(latinAlias))) return 1
   return Math.max(whole, ...parts.map(part => similarity(part, actual, chinese)))
 }
 
@@ -115,8 +118,9 @@ function save(rows) {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     sourceManifest: 'img/_cover-manifest.json',
+    sourceDirectory: 'music/',
     sourceDocumentation: 'https://performance-partners.apple.com/search-api',
-    description: '曲风来源为 Apple 曲目 primaryGenreName；无可靠匹配的歌曲保留待复核，不根据语言推断风格。此文件不自动修改数据库。',
+    description: '曲风来源为 Apple 曲目 primaryGenreName；无可靠匹配的歌曲保留待复核，不根据语言推断风格。后端启动时仅将 matched 曲风同步到 source_path 匹配且仍未分类的歌曲。',
     counts,
     songs: rows,
   }
@@ -127,13 +131,27 @@ function save(rows) {
 
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
   .filter(entry => entry.status === 'matched' && fs.existsSync(path.join(root, 'music', entry.category, entry.file)))
+const listed = new Set(manifest.map(entry => `${entry.category}/${entry.file}`))
+for (const category of fs.readdirSync(path.join(root, 'music'), { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name)) {
+  for (const file of fs.readdirSync(path.join(root, 'music', category)).filter(file => file.toLowerCase().endsWith('.mp3')).sort()) {
+    if (listed.has(`${category}/${file}`)) continue
+    const stem = path.parse(file).name
+    const separator = stem.lastIndexOf(' - ')
+    manifest.push({ category, file,
+      title: separator < 0 ? stem : stem.slice(0, separator).trim(),
+      artist: separator < 0 ? '' : stem.slice(separator + 3).trim() })
+  }
+}
 const previous = fs.existsSync(outputPath) ? JSON.parse(fs.readFileSync(outputPath, 'utf8')) : null
 const old = new Map((previous?.songs || []).map(row => [row.sourcePath, row]))
 const rows = manifest.map(entry => {
   const sourcePath = `${entry.category}/${entry.file}`
   return old.get(sourcePath) || {
     sourcePath, title: entry.title, artist: entry.artist, language: entry.category,
-    genre: null, genreName: null, styles: [], status: 'pending', confidence: null, evidence: null,
+    genre: null, genreName: null, styles: [],
+    status: !entry.artist || !entry.title || entry.title.toLowerCase() === 'null' || entry.artist === '未知歌手' ? 'review' : 'pending',
+    reviewReason: !entry.artist || !entry.title || entry.title.toLowerCase() === 'null' || entry.artist === '未知歌手' ? 'missing_title_or_artist' : null,
+    confidence: null, evidence: null,
   }
 })
 if (retryReview) {
@@ -160,7 +178,7 @@ if (process.argv.includes('--renormalize')) {
 save(rows)
 let processed = 0
 for (const [index, entry] of manifest.entries()) {
-  if (rows[index].status !== 'pending' && rows[index].status !== 'search_error' && !(retryReview && rows[index].status === 'review')) continue
+  if (rows[index].status !== 'pending' && rows[index].status !== 'search_error' && !((retryReview || (retryUnlisted && !listed.has(rows[index].sourcePath))) && rows[index].status === 'review' && rows[index].reviewReason !== 'missing_title_or_artist')) continue
   if (maxSongs && processed >= maxSongs) break
   try {
     const country = store[entry.category] || 'US'

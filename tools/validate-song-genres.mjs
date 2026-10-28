@@ -7,6 +7,9 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, 'img', '_cover-manif
 const catalog = JSON.parse(fs.readFileSync(path.join(root, 'data', 'song-genres.json'), 'utf8'))
 const expected = new Set(manifest.filter(row => row.status === 'matched' && fs.existsSync(path.join(root, 'music', row.category, row.file)))
   .map(row => `${row.category}/${row.file}`))
+for (const category of fs.readdirSync(path.join(root, 'music'), { withFileTypes: true }).filter(row => row.isDirectory()).map(row => row.name)) {
+  for (const file of fs.readdirSync(path.join(root, 'music', category)).filter(file => file.toLowerCase().endsWith('.mp3'))) expected.add(`${category}/${file}`)
+}
 const paths = new Set()
 for (const song of catalog.songs) {
   if (!expected.has(song.sourcePath)) throw new Error(`不在有效曲库中：${song.sourcePath}`)
