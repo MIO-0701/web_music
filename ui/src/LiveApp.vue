@@ -77,6 +77,10 @@ const commentText = ref('')
 const dashboard = ref(null)
 const adminUsers = ref([])
 const adminSongs = ref([])
+const selectedSongIds = ref(new Set())
+const bulkUploadOpen = ref(false)
+const bulkFiles = ref({ audioZip: null, coverZip: null, csv: null })
+const bulkReport = ref(null)
 const adminComments = ref([])
 const adminTotal = ref(0)
 const adminUserKeyword = ref('')
@@ -92,6 +96,7 @@ let favoritesRequestId = 0, historyRequestId = 0, favoriteSearchTimer
 const isAdminPage = computed(() => adminNav.some(([id]) => id === page.value))
 const isMember = computed(() => !!user.value?.membershipExpiresAt && new Date(user.value.membershipExpiresAt).getTime() > Date.now())
 const isAdmin = computed(() => user.value?.role === 'ADMIN')
+const allAdminSongsSelected = computed(() => adminSongs.value.length > 0 && adminSongs.value.every(song => selectedSongIds.value.has(song.id)))
 const gatedPages = new Set(['player', 'recommend', 'ai', 'favorites', 'playlists', 'playlist-detail', 'history', 'membership'])
 
 function notify(message) { toast.value = message; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.value = '' }, 3600) }
@@ -134,7 +139,7 @@ function clearSession() {
   pendingPlaylistId.value = null
   historyLoading.value = false
   conversations.value = []; messages.value = []; conversationId.value = null
-  dashboard.value = null; adminUsers.value = []; adminSongs.value = []; adminComments.value = []; adminTotal.value = 0
+  dashboard.value = null; adminUsers.value = []; adminSongs.value = []; selectedSongIds.value = new Set(); bulkUploadOpen.value = false; bulkReport.value = null; adminComments.value = []; adminTotal.value = 0
   membershipDraft.value = {}; songEdit.value = null; uploadOpen.value = false
   error.value = ''
   loginOpen.value = false; page.value = 'home'; window.location.hash = 'home'
@@ -406,6 +411,46 @@ async function loadAdminSongs() {
   if (epoch !== sessionEpoch || page.value !== 'songs' || selectedPage !== listPage.value || selectedKeyword !== adminSongKeyword.value) return
   adminSongs.value = data.items.map(songView); adminTotal.value = data.total
 }
+function selectSong(id, checked) {
+  const next = new Set(selectedSongIds.value)
+  if (checked) next.add(id); else next.delete(id)
+  selectedSongIds.value = next
+}
+function selectCurrentPage(checked) {
+  const next = new Set(selectedSongIds.value)
+  adminSongs.value.forEach(song => { if (checked) next.add(song.id); else next.delete(song.id) })
+  selectedSongIds.value = next
+}
+async function batchSongAction(action) {
+  const ids = [...selectedSongIds.value]
+  if (!ids.length) { notify('请先勾选歌曲'); return }
+  if (ids.length > 100) { notify('每次最多处理 100 首歌曲'); return }
+  const label = { UNPUBLISH: '下架', DELETE: '永久删除', SET_VIP: '设为 VIP', CLEAR_VIP: '取消 VIP' }[action]
+  if (!window.confirm(`确定将已选的 ${ids.length} 首歌曲${label}吗？`)) return
+  await run(async () => {
+    const result = await request('/admin/songs/batch/actions', { method: 'POST', body: { ids, action } })
+    selectedSongIds.value = new Set(); await loadAdminSongs(); notify(`已处理 ${result.processed} 首歌曲`)
+  })
+}
+async function downloadBatchTemplate() {
+  await run(async () => {
+    const response = await request('/admin/songs/batch/template', { raw: true })
+    const url = URL.createObjectURL(await response.blob())
+    const link = document.createElement('a'); link.href = url; link.download = 'shengyu-song-template.csv'; link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 3000)
+    notify('CSV 模板已下载')
+  })
+}
+async function uploadSongBatch() {
+  const { audioZip, coverZip, csv } = bulkFiles.value
+  if (!audioZip || !coverZip || !csv) { notify('请选择音乐 ZIP、封面 ZIP 和 CSV'); return }
+  if (![audioZip, coverZip].every(file => /\.zip$/i.test(file.name) && file.size <= 400_000_000) || !/\.csv$/i.test(csv.name) || csv.size > 1_000_000) { notify('ZIP 不超过 400 MB，CSV 不超过 1 MB'); return }
+  await run(async () => {
+    const form = new FormData(); form.append('audioZip', audioZip); form.append('coverZip', coverZip); form.append('csv', csv)
+    bulkReport.value = await request('/admin/songs/batch/upload', { method: 'POST', body: form })
+    await loadAdminSongs(); notify(`导入 ${bulkReport.value.imported} 首，跳过 ${bulkReport.value.skipped} 首，失败 ${bulkReport.value.failed} 首`)
+  })
+}
 async function togglePublished(track) {
   await run(async () => { await request(`/admin/songs/${track.id}/publish?value=${!track.published}`, { method: 'PATCH' }); await loadAdminSongs(); notify('上下架状态已更新') })
 }
@@ -583,7 +628,12 @@ onUnmounted(() => { clearTimeout(toastTimer); clearTimeout(searchTimer); clearTi
 
         <template v-else-if="page === 'members'"><div class="page-intro admin-intro"><span class="eyebrow">PEOPLE & MEMBERSHIP</span><h1>用户与会员<span class="accent-dot">.</span></h1><p>设置会员有效期并管理账号状态。</p></div><div class="admin-list-panel"><div class="admin-filter-row"><input v-model="adminUserKeyword" type="search" placeholder="搜索用户名或昵称" aria-label="搜索用户" /></div><div class="panel-heading list-heading"><h3>用户列表 <sup>{{ adminTotal }}</sup></h3></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>用户</th><th>账号</th><th>角色</th><th>会员到期时间</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminUsers" :key="item.id"><td>{{ item.display_name }}</td><td>{{ item.username }}</td><td>{{ item.role }}</td><td><input v-model="membershipDraft[item.id]" type="datetime-local" class="table-input" :disabled="item.role === 'ADMIN'" /></td><td>{{ item.enabled ? '正常' : '禁用' }}</td><td><button class="table-action" :disabled="item.role === 'ADMIN'" @click="saveMembership(item)">保存会员</button><button class="table-action" :disabled="item.role === 'ADMIN'" @click="toggleUser(item)">{{ item.enabled ? '禁用' : '启用' }}</button></td></tr></tbody></table></div><p v-if="!adminUsers.length" class="empty-state">没有符合条件的用户。</p><div class="pagination"><span>共 {{ adminTotal }} 位用户</span><div><button :disabled="listPage === 1" @click="nextListPage(-1)">上一页</button><button :disabled="listPage * 10 >= adminTotal" @click="nextListPage(1)">下一页</button></div></div></div></template>
 
-        <template v-else-if="page === 'songs'"><div class="page-intro with-action admin-intro"><div><span class="eyebrow">MUSIC CATALOG</span><h1>歌曲管理<span class="accent-dot">.</span></h1><p>上传歌曲、编辑标签与上下架。</p></div><button class="button button-accent" @click="uploadOpen = true"><Icon name="upload" :size="18" /> 上传歌曲</button></div><div class="admin-list-panel"><div class="admin-filter-row"><input v-model="adminSongKeyword" type="search" placeholder="搜索歌曲或歌手" aria-label="搜索管理歌曲" /></div><div class="panel-heading list-heading"><h3>全部歌曲 <sup>{{ adminTotal }}</sup></h3></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>歌曲</th><th>专辑 / 风格</th><th>会员</th><th>播放量</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="song in adminSongs" :key="song.id"><td><span class="song-cell"><AlbumCover :track="song" size="tiny" /><span><strong>{{ song.title }}</strong><small>{{ song.artist }}</small></span></span></td><td>{{ song.album }} / {{ song.category }}</td><td>{{ song.vip ? 'VIP' : '免费' }}</td><td>{{ song.plays }}</td><td>{{ song.published ? '已上架' : '已下架' }}</td><td><button class="table-action" @click="openSongEdit(song)">编辑</button><button class="table-action" @click="togglePublished(song)">{{ song.published ? '下架' : '上架' }}</button></td></tr></tbody></table></div><p v-if="!adminSongs.length" class="empty-state">没有符合条件的歌曲。</p><div class="pagination"><span>共 {{ adminTotal }} 首歌曲</span><div><button :disabled="listPage === 1" @click="nextListPage(-1)">上一页</button><button :disabled="listPage * 10 >= adminTotal" @click="nextListPage(1)">下一页</button></div></div></div></template>
+        <template v-else-if="page === 'songs'">
+          <div class="page-intro with-action admin-intro"><div><span class="eyebrow">MUSIC CATALOG</span><h1>歌曲管理<span class="accent-dot">.</span></h1><p>搜索、批量管理与上传曲库歌曲。</p></div><div class="admin-header-actions"><button class="button" type="button" @click="bulkReport = null; bulkFiles = { audioZip: null, coverZip: null, csv: null }; bulkUploadOpen = true"><Icon name="upload" :size="18" /> 批量上传</button><button class="button button-accent" type="button" @click="uploadOpen = true"><Icon name="plus" :size="18" /> 上传单曲</button></div></div>
+          <div class="admin-list-panel"><div class="admin-filter-row"><input v-model="adminSongKeyword" type="search" placeholder="搜索歌曲、歌手或专辑" aria-label="搜索管理歌曲" /></div>
+            <div class="admin-batch-bar"><strong>已选 {{ selectedSongIds.size }} 首</strong><button type="button" :disabled="!selectedSongIds.size || busy" @click="batchSongAction('UNPUBLISH')">批量下架</button><button type="button" :disabled="!selectedSongIds.size || busy" @click="batchSongAction('SET_VIP')">设为 VIP</button><button type="button" :disabled="!selectedSongIds.size || busy" @click="batchSongAction('CLEAR_VIP')">取消 VIP</button><button class="danger" type="button" :disabled="!selectedSongIds.size || busy" @click="batchSongAction('DELETE')">批量删除</button><button type="button" :disabled="!selectedSongIds.size" @click="selectedSongIds = new Set()">清空选择</button></div>
+            <div class="panel-heading list-heading"><h3>全部歌曲 <sup>{{ adminTotal }}</sup></h3></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th><input type="checkbox" aria-label="全选当前页" :checked="allAdminSongsSelected" @change="selectCurrentPage($event.target.checked)" /></th><th>歌曲</th><th>专辑 / 风格</th><th>会员</th><th>播放量</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="song in adminSongs" :key="song.id"><td><input type="checkbox" :aria-label="`选择 ${song.title}`" :checked="selectedSongIds.has(song.id)" @change="selectSong(song.id, $event.target.checked)" /></td><td><span class="song-cell"><AlbumCover :track="song" size="tiny" /><span><strong>{{ song.title }}</strong><small>{{ song.artist }}</small></span></span></td><td>{{ song.album }} / {{ song.genreName }}</td><td>{{ song.vip ? 'VIP' : '免费' }}</td><td>{{ song.plays }}</td><td>{{ song.published ? '已上架' : '已下架' }}</td><td><button class="table-action" @click="openSongEdit(song)">编辑</button><button class="table-action" @click="togglePublished(song)">{{ song.published ? '下架' : '上架' }}</button></td></tr></tbody></table></div><p v-if="!adminSongs.length" class="empty-state">没有符合条件的歌曲。</p><div class="pagination"><span>共 {{ adminTotal }} 首歌曲 · 当前页可全选，选择可跨页保留</span><div><button :disabled="listPage === 1" @click="nextListPage(-1)">上一页</button><button :disabled="listPage * 10 >= adminTotal" @click="nextListPage(1)">下一页</button></div></div></div>
+        </template>
 
         <template v-else-if="page === 'comments'"><div class="page-intro admin-intro"><span class="eyebrow">COMMUNITY VOICES</span><h1>评论管理<span class="accent-dot">.</span></h1><p>审核听众的音乐分享。</p></div><div class="admin-filter-row"><select v-model="adminCommentStatus" aria-label="筛选评论状态"><option value="">全部状态</option><option value="PENDING">待审核</option><option value="APPROVED">已通过</option><option value="HIDDEN">已隐藏</option></select></div><div class="comment-list"><p v-if="!adminComments.length" class="empty-state">当前筛选条件下没有评论。</p><div v-for="item in adminComments" :key="item.id" class="comment-card"><span class="list-avatar avatar-peach">{{ item.display_name?.slice(0, 1) }}</span><div class="comment-body"><div class="comment-meta"><strong>{{ item.display_name }}</strong><span>评论《{{ item.song_title }}》</span><span>{{ item.created_at }}</span></div><p>{{ item.content }}</p><span class="status-pill" :class="item.status === 'APPROVED' ? 'success' : 'pending'">{{ item.status }}</span></div><div class="comment-actions"><button @click="moderate(item, 'APPROVED')">通过</button><button @click="moderate(item, 'HIDDEN')">隐藏</button></div></div></div><div class="live-pagination"><button :disabled="listPage === 1" @click="nextListPage(-1)">上一页</button><span>第 {{ listPage }} 页 · 共 {{ adminTotal }} 条</span><button :disabled="listPage * 10 >= adminTotal" @click="nextListPage(1)">下一页</button></div></template>
       </main>
@@ -592,7 +642,8 @@ onUnmounted(() => { clearTimeout(toastTimer); clearTimeout(searchTimer); clearTi
 
     <div v-if="playlistPickerOpen" class="live-modal-backdrop" @click.self="playlistPickerOpen = false"><div class="live-modal playlist-picker"><button class="modal-close" type="button" @click="playlistPickerOpen = false">×</button><span class="eyebrow">ADD TO PLAYLIST</span><h2>将《{{ playlistPickerTrack?.title }}》加入歌单</h2><p class="live-note">选择一个已有歌单，歌曲会立即加入。</p><button v-for="list in playlists" :key="list.id" class="playlist-picker-option" type="button" @click="addToPlaylist(list.id)"><span>♫</span><strong>{{ list.name }}</strong><small>{{ list.song_count }} 首</small><Icon name="plus" :size="18" /></button><p v-if="!playlists.length" class="empty-state">还没有歌单。请先到“我的歌单”创建一个。</p><button v-if="!playlists.length" class="button button-accent" type="button" @click="playlistPickerOpen = false; navigate('playlists')">去创建歌单</button></div></div>
 <div v-if="loginOpen" class="live-modal-backdrop" @click.self="loginOpen = false"><form class="live-modal auth-modal" @submit.prevent="login"><button class="modal-close" type="button" @click="loginOpen = false">×</button><span class="eyebrow">WELCOME TO SHENGYU</span><h2>{{ authMode === 'login' ? '再次相遇，好音乐。' : '开始你的音乐旅程。' }}</h2><label>用户名<input v-model="loginName" required minlength="3" maxlength="30" autocomplete="username" /></label><label v-if="authMode === 'register'">昵称<input v-model="registerName" maxlength="80" /></label><label>密码<input v-model="loginPassword" required type="password" minlength="8" :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'" /></label><button class="button button-accent" type="submit" :disabled="busy">{{ authMode === 'login' ? '登录' : '注册' }}</button><button class="auth-switch" type="button" @click="authMode = authMode === 'login' ? 'register' : 'login'">{{ authMode === 'login' ? '没有账号？立即注册' : '已有账号？返回登录' }}</button></form></div>
-    <div v-if="uploadOpen" class="live-modal-backdrop" @click.self="uploadOpen = false"><form class="live-modal" @submit.prevent="uploadSong"><button class="modal-close" type="button" @click="uploadOpen = false">×</button><span class="eyebrow">MUSIC CATALOG</span><h2>上传新歌曲</h2><div class="form-grid"><label>歌名<input v-model="uploadForm.title" required maxlength="200" /></label><label>歌手<input v-model="uploadForm.artist" required maxlength="200" /></label><label>专辑<input v-model="uploadForm.album" /></label><label>语言<select v-model="uploadForm.language"><option value="cn">中文</option><option value="en">英文</option><option value="jp">日文</option><option value="fr">法文</option><option value="ru">俄文</option></select></label><label>风格<input v-model="uploadForm.genre" /></label><label>标签，逗号分隔<input v-model="uploadForm.tags" /></label><label>MP3 音频<input type="file" accept=".mp3,audio/mpeg" required @change="uploadForm.audio = $event.target.files[0]" /></label><label>封面<input type="file" accept=".jpg,.jpeg,.png,.webp,image/*" @change="uploadForm.cover = $event.target.files[0]" /></label></div><label class="checkbox-line"><input v-model="uploadForm.vip" type="checkbox" /> 会员歌曲（需要 FFmpeg 生成试听文件）</label><button class="button button-accent" type="submit" :disabled="busy">保存歌曲</button></form></div>
+    <div v-if="bulkUploadOpen" class="live-modal-backdrop" @click.self="bulkUploadOpen = false"><form class="live-modal bulk-upload-modal" @submit.prevent="uploadSongBatch"><button class="modal-close" type="button" @click="bulkUploadOpen = false">×</button><span class="eyebrow">BATCH IMPORT</span><h2>批量上传歌曲</h2><p class="live-note">准备音乐 ZIP、封面 ZIP 和 UTF-8 CSV。CSV 中的 audio_file / cover_file 填写各自 ZIP 内的相对路径（例如 cn/歌曲.mp3）。单次最多 100 首；重复音频会跳过。</p><button class="button" type="button" @click="downloadBatchTemplate">下载 CSV 表格模板</button><div class="form-grid bulk-files"><label>音乐 MP3 压缩包<input type="file" accept=".zip,application/zip" required @change="bulkFiles.audioZip = $event.target.files[0]" /></label><label>封面压缩包<input type="file" accept=".zip,application/zip" required @change="bulkFiles.coverZip = $event.target.files[0]" /></label><label>歌曲信息 CSV<input type="file" accept=".csv,text/csv" required @change="bulkFiles.csv = $event.target.files[0]" /></label></div><p class="live-note">语种：cn 中文、en 英文、jp 日文、fr 法文、ru 俄文。VIP 列填 true 或 false。</p><div class="genre-help"><strong>分类代码（CSV 的 genre 列）</strong><div><span v-for="(name, code) in genreNames" :key="code"><code>{{ code }}</code> {{ name }}</span></div></div><button class="button button-accent" type="submit" :disabled="busy">{{ busy ? '正在导入…' : '开始批量上传' }}</button><div v-if="bulkReport" class="batch-report"><strong>导入完成：成功 {{ bulkReport.imported }} · 跳过 {{ bulkReport.skipped }} · 失败 {{ bulkReport.failed }}</strong><p v-for="item in bulkReport.errors" :key="item.row">第 {{ item.row }} 行（{{ item.file }}）：{{ item.error }}</p></div></form></div>
+    <div v-if="uploadOpen" class="live-modal-backdrop" @click.self="uploadOpen = false"><form class="live-modal" @submit.prevent="uploadSong"><button class="modal-close" type="button" @click="uploadOpen = false">×</button><span class="eyebrow">MUSIC CATALOG</span><h2>上传新歌曲</h2><div class="form-grid"><label>歌名<input v-model="uploadForm.title" required maxlength="200" /></label><label>歌手<input v-model="uploadForm.artist" required maxlength="200" /></label><label>专辑<input v-model="uploadForm.album" /></label><label>语言<select v-model="uploadForm.language"><option value="cn">中文</option><option value="en">英文</option><option value="jp">日文</option><option value="fr">法文</option><option value="ru">俄文</option></select></label><label>风格<select v-model="uploadForm.genre"><option value="未分类">未分类</option><option v-for="(name, code) in genreNames" :key="code" :value="code">{{ name }}（{{ code }}）</option></select></label><label>标签，逗号分隔<input v-model="uploadForm.tags" /></label><label>MP3 音频<input type="file" accept=".mp3,audio/mpeg" required @change="uploadForm.audio = $event.target.files[0]" /></label><label>封面<input type="file" accept=".jpg,.jpeg,.png,.webp,image/*" @change="uploadForm.cover = $event.target.files[0]" /></label></div><label class="checkbox-line"><input v-model="uploadForm.vip" type="checkbox" /> 会员歌曲（需要 FFmpeg 生成试听文件）</label><button class="button button-accent" type="submit" :disabled="busy">保存歌曲</button></form></div>
     <div v-if="songEdit" class="live-modal-backdrop" @click.self="songEdit = null"><form class="live-modal" @submit.prevent="saveSong"><button class="modal-close" type="button" @click="songEdit = null">×</button><span class="eyebrow">EDIT TRACK</span><h2>编辑歌曲</h2><div class="form-grid"><label>歌名<input v-model="songEdit.title" required /></label><label>歌手<input v-model="songEdit.artist" required /></label><label>专辑<input v-model="songEdit.album" /></label><label>风格<input v-model="songEdit.category" /></label><label>标签，逗号分隔<input v-model="songEdit.tagsText" /></label><label>描述<input v-model="songEdit.description" /></label></div><label class="checkbox-line"><input v-model="songEdit.vip" type="checkbox" /> 会员歌曲</label><label class="checkbox-line"><input v-model="songEdit.published" type="checkbox" /> 已上架</label><button class="button button-accent" type="submit" :disabled="busy">保存修改</button></form></div>
     <div v-if="toast" class="toast-message">{{ toast }}</div>
   </div>

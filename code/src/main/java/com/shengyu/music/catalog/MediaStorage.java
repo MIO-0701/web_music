@@ -6,6 +6,7 @@ import io.minio.GetObjectArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
 import io.minio.StatObjectArgs;
 import jakarta.annotation.PostConstruct;
 import java.io.InputStream;
@@ -56,6 +57,12 @@ public class MediaStorage {
     public long size(String key) {
         try { return client.statObject(StatObjectArgs.builder().bucket(bucket).object(key).build()).size(); }
         catch (Exception ex) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "文件读取失败"); }
+    }
+
+    public void delete(String key) {
+        if (key == null || key.isBlank()) return;
+        try { client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(key).build()); }
+        catch (Exception ex) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "文件删除失败"); }
     }
 
     public InputStream read(String key, long offset, long length) {

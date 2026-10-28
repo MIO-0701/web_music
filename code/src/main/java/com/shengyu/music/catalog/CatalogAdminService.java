@@ -14,9 +14,14 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class CatalogAdminService {
+    private static final Logger log = LoggerFactory.getLogger(CatalogAdminService.class);
     private final JdbcTemplate jdbc;
     private final NamedParameterJdbcTemplate named;
     private final MediaStorage storage;
@@ -91,6 +96,48 @@ public class CatalogAdminService {
             throw ApiException.badRequest("会员歌曲必须先生成试听文件");
         jdbc.update("UPDATE songs SET published=? WHERE id=?", published, id);
         catalog.invalidateHot();
+    }
+
+    @Transactional
+    public int batch(List<Long> ids, String action) {
+        if (ids == null || ids.isEmpty() || ids.size() > 100 || ids.stream().anyMatch(id -> id == null || id <= 0))
+            throw ApiException.badRequest("每次须选择 1 到 100 首歌曲");
+        var unique = ids.stream().distinct().toList();
+        if (!List.of("UNPUBLISH", "DELETE", "SET_VIP", "CLEAR_VIP").contains(action)) throw ApiException.badRequest("批量操作不支持");
+        var rows = unique.stream().map(catalog::raw).toList();
+        if ("DELETE".equals(action)) {
+            var keys = rows.stream().flatMap(row -> java.util.stream.Stream.of(row.get("audio_key"), row.get("preview_key"), row.get("cover_key")))
+                .filter(Objects::nonNull).map(String::valueOf).toList();
+            for (long id : unique) jdbc.update("DELETE FROM songs WHERE id=?", id);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() {
+                    for (String key : keys) try { storage.delete(key); }
+                    catch (Exception ex) { log.warn("Could not remove media object {} after song deletion", key, ex); }
+                }
+            });
+        } else if ("UNPUBLISH".equals(action)) {
+            for (long id : unique) jdbc.update("UPDATE songs SET published=FALSE WHERE id=?", id);
+        } else if ("CLEAR_VIP".equals(action)) {
+            for (long id : unique) jdbc.update("UPDATE songs SET vip=FALSE WHERE id=?", id);
+        } else {
+            for (var row : rows) {
+                long id = ((Number) row.get("id")).longValue();
+                if (row.get("preview_key") == null) {
+                    Path audio = null;
+                    try {
+                        audio = Files.createTempFile("shengyu-batch-vip-", ".mp3");
+                        try (var input = storage.read((String) row.get("audio_key"), 0, -1)) { Files.copy(input, audio, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+                        Path preview = previews.generate(audio);
+                        try { jdbc.update("UPDATE songs SET preview_key=? WHERE id=?", storage.put(preview, "previews", "mp3"), id); }
+                        finally { Files.deleteIfExists(preview); }
+                    } catch (Exception ex) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "歌曲 " + id + " 生成试听文件失败"); }
+                    finally { if (audio != null) try { Files.deleteIfExists(audio); } catch (Exception ignored) { } }
+                }
+                jdbc.update("UPDATE songs SET vip=TRUE WHERE id=?", id);
+            }
+        }
+        catalog.invalidateHot();
+        return unique.size();
     }
 
     private void setTags(long songId, List<String> tags) {

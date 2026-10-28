@@ -42,7 +42,7 @@ export function queryString(params) {
 }
 
 const tones = ['cover-sunset', 'cover-sea', 'cover-night', 'cover-orange', 'cover-green', 'cover-cloud', 'cover-light', 'cover-space']
-export const genreNames = { pop: '流行', rock: '摇滚', alternative: '另类', 'rnb-soul': 'R&B / 灵魂', 'hip-hop': '嘻哈 / 说唱', anime: '动漫音乐', soundtrack: '原声 / 配乐', jazz: '爵士', 'singer-songwriter': '唱作', instrumental: '器乐', 'new-age': '新世纪' }
+export const genreNames = { pop: '流行', rock: '摇滚', alternative: '另类', 'rnb-soul': 'R&B / 灵魂', 'hip-hop': '嘻哈 / 说唱', electronic: '电子', dance: '舞曲', jazz: '爵士', classical: '古典', folk: '民谣', 'singer-songwriter': '唱作', soundtrack: '原声 / 配乐', anime: '动漫音乐', country: '乡村', metal: '金属', blues: '蓝调', reggae: '雷鬼', latin: '拉丁', instrumental: '器乐', 'new-age': '新世纪' }
 export function songView(row) {
   const id = Number(row.id ?? row.song_id)
   const duration = Number(row.duration_seconds ?? (row.duration ? Number(row.duration.split(':')[0]) * 60 + Number(row.duration.split(':')[1]) : 0))
