@@ -6,6 +6,8 @@ import jakarta.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
@@ -39,15 +41,32 @@ public class AdminController {
         return Map.of("message", "用户状态已更新");
     }
 
-    @GetMapping("/comments") public PageResult<Map<String, Object>> comments(@RequestParam(required = false) String status,
+    @GetMapping("/membership-requests") public List<Map<String, Object>> membershipRequests() {
+        return jdbc.queryForList("SELECT r.id,r.user_id,r.status,r.created_at,u.display_name,u.username FROM membership_requests r JOIN users u ON u.id=r.user_id WHERE r.status='PENDING' ORDER BY r.id ASC");
+    }
+    @Transactional
+    @PatchMapping("/membership-requests/{id}") public Map<String, String> reviewMembership(@PathVariable long id, @RequestParam String decision) {
+        String status = decision.toUpperCase();
+        if (!List.of("APPROVED", "REJECTED").contains(status)) throw ApiException.badRequest("不支持的审核决定");
+        var rows = jdbc.queryForList("SELECT user_id FROM membership_requests WHERE id=? AND status='PENDING' FOR UPDATE", id);
+        if (rows.isEmpty()) throw ApiException.notFound("待审核申请不存在");
+        long userId = ((Number) rows.getFirst().get("user_id")).longValue();
+        if (status.equals("APPROVED")) jdbc.update("UPDATE users SET membership_expires_at=DATE_ADD(GREATEST(COALESCE(membership_expires_at,NOW()),NOW()),INTERVAL 30 DAY) WHERE id=? AND role='USER'", userId);
+        jdbc.update("UPDATE membership_requests SET status=?,reviewed_at=NOW(),reviewer_id=? WHERE id=?", status, com.shengyu.music.auth.AuthService.current().id(), id);
+        return Map.of("message", "申请已审核");
+    }
+
+    @GetMapping("/comments") public PageResult<Map<String, Object>> comments(@RequestParam(required = false) String status, @RequestParam(required = false) String song,
         @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
         int p = PageResult.safePage(page), s = PageResult.safeSize(size);
-        String condition = status == null || status.isBlank() ? "" : " WHERE c.status=?";
-        Object[] filter = condition.isBlank() ? new Object[0] : new Object[]{status.toUpperCase()};
-        long total = jdbc.queryForObject("SELECT COUNT(*) FROM comments c" + condition, Long.class, filter);
-        var items = condition.isBlank()
-            ? jdbc.queryForList("SELECT c.id,c.content,c.status,c.created_at,u.display_name,s.title song_title FROM comments c JOIN users u ON u.id=c.user_id JOIN songs s ON s.id=c.song_id ORDER BY c.id DESC LIMIT ? OFFSET ?", s, (p - 1) * s)
-            : jdbc.queryForList("SELECT c.id,c.content,c.status,c.created_at,u.display_name,s.title song_title FROM comments c JOIN users u ON u.id=c.user_id JOIN songs s ON s.id=c.song_id" + condition + " ORDER BY c.id DESC LIMIT ? OFFSET ?", status.toUpperCase(), s, (p - 1) * s);
+        var args = new ArrayList<Object>();
+        String condition = " WHERE 1=1";
+        if (status != null && !status.isBlank()) { condition += " AND c.status=?"; args.add(status.toUpperCase()); }
+        if (song != null && !song.isBlank()) { condition += " AND s.title LIKE ?"; args.add("%" + song.trim() + "%"); }
+        String from = " FROM comments c JOIN users u ON u.id=c.user_id JOIN songs s ON s.id=c.song_id";
+        long total = jdbc.queryForObject("SELECT COUNT(*)" + from + condition, Long.class, args.toArray());
+        args.add(s); args.add((p - 1) * s);
+        var items = jdbc.queryForList("SELECT c.id,c.content,c.status,c.created_at,u.display_name,s.title song_title" + from + condition + " ORDER BY c.id DESC LIMIT ? OFFSET ?", args.toArray());
         return new PageResult<>(items, total, p, s);
     }
     @PatchMapping("/comments/{id}/status") public Map<String, String> commentStatus(@PathVariable long id, @RequestParam String value) {

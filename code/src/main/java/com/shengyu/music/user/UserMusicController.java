@@ -59,26 +59,26 @@ public class UserMusicController {
         return Map.of("message", "已取消收藏");
     }
 
-    public record PlaylistRequest(@NotBlank @Size(max = 100) String name) {}
+    public record PlaylistRequest(@NotBlank @Size(max = 100) String name, @Size(max = 500) String description) {}
     @GetMapping("/playlists") public List<Map<String, Object>> playlists() {
-        return jdbc.queryForList("SELECT p.id,p.name,p.created_at,COUNT(visible.id) song_count," +
+        return jdbc.queryForList("SELECT p.id,p.name,p.description,p.created_at,COUNT(visible.id) song_count," +
             "(SELECT ps2.song_id FROM playlist_songs ps2 JOIN songs s2 ON s2.id=ps2.song_id AND s2.published=TRUE WHERE ps2.playlist_id=p.id ORDER BY ps2.added_at DESC,ps2.song_id DESC LIMIT 1) cover_song_id " +
-            "FROM playlists p LEFT JOIN playlist_songs ps ON ps.playlist_id=p.id LEFT JOIN songs visible ON visible.id=ps.song_id AND visible.published=TRUE WHERE p.user_id=? GROUP BY p.id,p.name,p.created_at ORDER BY p.id DESC", AuthService.current().id());
+            "FROM playlists p LEFT JOIN playlist_songs ps ON ps.playlist_id=p.id LEFT JOIN songs visible ON visible.id=ps.song_id AND visible.published=TRUE WHERE p.user_id=? GROUP BY p.id,p.name,p.description,p.created_at ORDER BY p.id DESC", AuthService.current().id());
     }
     @PostMapping("/playlists") public Map<String, Object> createPlaylist(@Valid @RequestBody PlaylistRequest body) {
         var keys = new GeneratedKeyHolder();
-        named.update("INSERT INTO playlists(user_id,name) VALUES(:user,:name)", new MapSqlParameterSource("user", AuthService.current().id()).addValue("name", body.name().trim()), keys);
+        named.update("INSERT INTO playlists(user_id,name,description) VALUES(:user,:name,:description)", new MapSqlParameterSource("user", AuthService.current().id()).addValue("name", body.name().trim()).addValue("description", body.description() == null ? "" : body.description().trim()), keys);
         return Map.of("id", Objects.requireNonNull(keys.getKey()).longValue());
     }
     @GetMapping("/playlists/{id}") public Map<String, Object> playlist(@PathVariable long id) {
         requirePlaylistOwner(id);
-        var name = jdbc.queryForObject("SELECT name FROM playlists WHERE id=?", String.class, id);
+        var playlist = jdbc.queryForMap("SELECT name,description FROM playlists WHERE id=?", id);
         var songs = jdbc.queryForList("SELECT s.id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip FROM playlist_songs ps JOIN songs s ON s.id=ps.song_id WHERE ps.playlist_id=? AND s.published=TRUE ORDER BY ps.added_at DESC", id);
         songs.forEach(song -> song.put("coverUrl", "/api/songs/" + song.get("id") + "/cover"));
-        return Map.of("id", id, "name", name, "songs", songs);
+        return Map.of("id", id, "name", playlist.get("name"), "description", playlist.get("description"), "songs", songs);
     }
     @PutMapping("/playlists/{id}") public Map<String, String> renamePlaylist(@PathVariable long id, @Valid @RequestBody PlaylistRequest body) {
-        requirePlaylistOwner(id); jdbc.update("UPDATE playlists SET name=? WHERE id=?", body.name().trim(), id); return Map.of("message", "已更新");
+        requirePlaylistOwner(id); jdbc.update("UPDATE playlists SET name=?,description=? WHERE id=?", body.name().trim(), body.description() == null ? "" : body.description().trim(), id); return Map.of("message", "已更新");
     }
     @DeleteMapping("/playlists/{id}") public Map<String, String> deletePlaylist(@PathVariable long id) {
         requirePlaylistOwner(id); jdbc.update("DELETE FROM playlists WHERE id=?", id); return Map.of("message", "已删除");
@@ -90,9 +90,30 @@ public class UserMusicController {
     @DeleteMapping("/playlists/{id}/songs/{songId}") public Map<String, String> removeSong(@PathVariable long id, @PathVariable long songId) {
         requirePlaylistOwner(id); jdbc.update("DELETE FROM playlist_songs WHERE playlist_id=? AND song_id=?", id, songId); return Map.of("message", "已移出歌单");
     }
+    @DeleteMapping("/playlists/{id}/songs") public Map<String, Object> removeSongs(@PathVariable long id, @RequestBody List<Long> songIds) {
+        requirePlaylistOwner(id);
+        if (songIds.isEmpty()) return Map.of("removed", 0);
+        if (songIds.size() > 200) throw ApiException.badRequest("一次最多移除 200 首歌曲");
+        int removed = named.update("DELETE FROM playlist_songs WHERE playlist_id=:playlist AND song_id IN (:songs)",
+            new MapSqlParameterSource("playlist", id).addValue("songs", songIds));
+        return Map.of("removed", removed);
+    }
     private void requirePlaylistOwner(long id) {
         if (jdbc.queryForObject("SELECT COUNT(*) FROM playlists WHERE id=? AND user_id=?", Long.class, id, AuthService.current().id()) == 0)
             throw ApiException.notFound("歌单不存在");
+    }
+
+    @GetMapping("/membership-request") public Map<String, Object> membershipRequest() {
+        var rows = jdbc.queryForList("SELECT id,status,created_at,reviewed_at FROM membership_requests WHERE user_id=? ORDER BY id DESC LIMIT 1", AuthService.current().id());
+        return rows.isEmpty() ? Map.of("status", "NONE") : rows.getFirst();
+    }
+    @PostMapping("/membership-request") public Map<String, String> applyMembership() {
+        var user = AuthService.current();
+        if (!user.role().equals("USER")) throw ApiException.badRequest("管理员无需申请会员");
+        if (user.membershipExpiresAt() != null && user.membershipExpiresAt().isAfter(java.time.LocalDateTime.now())) throw ApiException.badRequest("会员资格仍有效");
+        if (jdbc.queryForObject("SELECT COUNT(*) FROM membership_requests WHERE user_id=? AND status='PENDING'", Long.class, user.id()) > 0) throw ApiException.badRequest("申请正在审核中");
+        jdbc.update("INSERT INTO membership_requests(user_id) VALUES(?)", user.id());
+        return Map.of("message", "申请已提交");
     }
 
     public record PlayEventRequest(long songId, @Min(10) @Max(7200) int secondsPlayed, boolean completed) {}
@@ -110,13 +131,17 @@ public class UserMusicController {
         catalog.invalidateHot();
         return Map.of("message", "播放记录已保存");
     }
-    @GetMapping("/history") public PageResult<Map<String, Object>> history(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
+    @GetMapping("/history") public PageResult<Map<String, Object>> history(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "") String keyword) {
         long user = AuthService.current().id(); int p = PageResult.safePage(page), s = PageResult.safeSize(size);
-        long total = jdbc.queryForObject("SELECT COUNT(DISTINCT e.song_id) FROM play_events e JOIN songs s ON s.id=e.song_id WHERE e.user_id=? AND s.published=TRUE", Long.class, user);
+        String filter = keyword.isBlank() ? "" : " AND (LOWER(s.title) LIKE ? OR LOWER(s.artist) LIKE ? OR LOWER(s.album_name) LIKE ?)";
+        String term = "%" + keyword.trim().toLowerCase(java.util.Locale.ROOT) + "%";
+        Object[] countArgs = filter.isEmpty() ? new Object[]{user} : new Object[]{user, term, term, term};
+        long total = jdbc.queryForObject("SELECT COUNT(DISTINCT e.song_id) FROM play_events e JOIN songs s ON s.id=e.song_id WHERE e.user_id=? AND s.published=TRUE" + filter, Long.class, countArgs);
+        Object[] rowArgs = filter.isEmpty() ? new Object[]{user, s, (p - 1) * s} : new Object[]{user, term, term, term, s, (p - 1) * s};
         var rows = jdbc.queryForList("SELECT e.id event_id,e.seconds_played,e.completed,e.created_at,s.id song_id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip " +
             "FROM (SELECT song_id,MAX(id) latest_id FROM play_events WHERE user_id=? GROUP BY song_id) latest " +
             "JOIN play_events e ON e.id=latest.latest_id JOIN songs s ON s.id=e.song_id AND s.published=TRUE " +
-            "ORDER BY e.id DESC LIMIT ? OFFSET ?", user, s, (p - 1) * s);
+            "WHERE 1=1" + filter + " ORDER BY e.id DESC LIMIT ? OFFSET ?", rowArgs);
         rows.forEach(row -> row.put("coverUrl", "/api/songs/" + row.get("song_id") + "/cover"));
         return new PageResult<>(rows, total, p, s);
     }
