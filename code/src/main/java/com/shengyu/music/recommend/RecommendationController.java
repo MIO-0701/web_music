@@ -2,15 +2,15 @@ package com.shengyu.music.recommend;
 
 import java.util.List;
 import java.util.Map;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 public class RecommendationController {
     private final RecommendationService recommendations;
-    private final JdbcTemplate jdbc;
+    private final SqlRepository jdbc;
     private final ExperimentService experiment;
-    public RecommendationController(RecommendationService recommendations, JdbcTemplate jdbc, ExperimentService experiment) { this.recommendations = recommendations; this.jdbc = jdbc; this.experiment = experiment; }
+    public RecommendationController(RecommendationService recommendations, SqlRepository jdbc, ExperimentService experiment) { this.recommendations = recommendations; this.jdbc = jdbc; this.experiment = experiment; }
     @GetMapping("/api/me/recommendations") public List<Map<String, Object>> mine(@RequestParam(defaultValue = "TAG") String algorithm) {
         return recommendations.mine(algorithm.toUpperCase());
     }

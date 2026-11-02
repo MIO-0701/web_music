@@ -8,10 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -22,13 +19,12 @@ import org.slf4j.LoggerFactory;
 @Service
 public class CatalogAdminService {
     private static final Logger log = LoggerFactory.getLogger(CatalogAdminService.class);
-    private final JdbcTemplate jdbc;
-    private final NamedParameterJdbcTemplate named;
+    private final SqlRepository jdbc;
     private final MediaStorage storage;
     private final PreviewGenerator previews;
     private final CatalogService catalog;
-    public CatalogAdminService(JdbcTemplate jdbc, NamedParameterJdbcTemplate named, MediaStorage storage, PreviewGenerator previews, CatalogService catalog) {
-        this.jdbc = jdbc; this.named = named; this.storage = storage; this.previews = previews; this.catalog = catalog;
+    public CatalogAdminService(SqlRepository jdbc, MediaStorage storage, PreviewGenerator previews, CatalogService catalog) {
+        this.jdbc = jdbc; this.storage = storage; this.previews = previews; this.catalog = catalog;
     }
 
     @Transactional
@@ -49,15 +45,10 @@ public class CatalogAdminService {
         }
         String audioKey = storage.put(audio, "audio", "mp3");
         String coverKey = cover == null ? null : storage.put(cover, "covers", extension(cover));
-        var params = new MapSqlParameterSource(Map.of(
-            "title", title.trim(), "artist", artist.trim(), "album", album == null ? "" : album.trim(),
-            "language", language == null ? "other" : language, "genre", genre == null ? "未分类" : genre.trim(),
-            "audio", audioKey, "duration", duration, "vip", vip))
-            .addValue("preview", previewKey).addValue("cover", coverKey).addValue("source", sourcePath);
-        var keys = new GeneratedKeyHolder();
-        named.update("INSERT INTO songs(title,artist,album_name,language_code,genre,audio_key,preview_key,cover_key,source_path,duration_seconds,vip,published) " +
-            "VALUES(:title,:artist,:album,:language,:genre,:audio,:preview,:cover,:source,:duration,:vip,TRUE)", params, keys);
-        long id = Objects.requireNonNull(keys.getKey()).longValue();
+        long id = jdbc.insertAndReturnId("INSERT INTO songs(title,artist,album_name,language_code,genre,audio_key,preview_key,cover_key,source_path,duration_seconds,vip,published) " +
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,TRUE)", title.trim(), artist.trim(), album == null ? "" : album.trim(),
+            language == null ? "other" : language, genre == null ? "未分类" : genre.trim(), audioKey,
+            previewKey, coverKey, sourcePath, duration, vip);
         setTags(id, tags == null ? List.of() : tags);
         catalog.invalidateHot();
         return id;

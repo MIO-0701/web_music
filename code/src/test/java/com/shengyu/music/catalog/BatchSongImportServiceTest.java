@@ -11,7 +11,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.mock.web.MockMultipartFile;
 import com.shengyu.music.common.ApiException;
 
@@ -29,7 +29,7 @@ class BatchSongImportServiceTest {
     private static final String HEADER = "title,artist,album,audio_file,cover_file,language,genre,vip\n";
 
     @Test void importsQuotedCsvAndMatchedArchivePaths() throws Exception {
-        var admin = mock(CatalogAdminService.class); var jdbc = mock(JdbcTemplate.class);
+        var admin = mock(CatalogAdminService.class); var jdbc = mock(SqlRepository.class);
         when(jdbc.queryForObject(anyString(), eq(Long.class), any())).thenReturn(0L);
         when(admin.add(any(), any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean(), anyString(), anyList())).thenReturn(42L);
         var service = new BatchSongImportService(admin, jdbc);
@@ -41,7 +41,7 @@ class BatchSongImportServiceTest {
     }
 
     @Test void rejectsZipTraversalBeforeImport() throws Exception {
-        var admin = mock(CatalogAdminService.class); var service = new BatchSongImportService(admin, mock(JdbcTemplate.class));
+        var admin = mock(CatalogAdminService.class); var service = new BatchSongImportService(admin, mock(SqlRepository.class));
         var error = assertThrows(ApiException.class, () -> service.upload(zip("audioZip", "audio.zip", "../bad.mp3"),
             zip("coverZip", "covers.zip", "cover.jpg"), csv(HEADER + "Song,Artist,,bad.mp3,cover.jpg,cn,pop,false\n")));
         assertThat(error.status()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -49,7 +49,7 @@ class BatchSongImportServiceTest {
     }
 
     @Test void rejectsUnknownGenreBeforeImport() throws Exception {
-        var admin = mock(CatalogAdminService.class); var service = new BatchSongImportService(admin, mock(JdbcTemplate.class));
+        var admin = mock(CatalogAdminService.class); var service = new BatchSongImportService(admin, mock(SqlRepository.class));
         var error = assertThrows(ApiException.class, () -> service.upload(zip("audioZip", "audio.zip", "song.mp3"),
             zip("coverZip", "covers.zip", "cover.jpg"), csv(HEADER + "Song,Artist,,song.mp3,cover.jpg,cn,unknown,false\n")));
         assertThat(error.status()).isEqualTo(HttpStatus.BAD_REQUEST);

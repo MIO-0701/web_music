@@ -8,13 +8,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 
 class ExperimentDatasetTest {
     @Test void officialDatasetProducesReproducibleBoundedMetrics() {
         Path dataset = Path.of("../data/hetrec2011-lastfm-2k.zip").toAbsolutePath().normalize();
         assumeTrue(Files.isRegularFile(dataset), "Official dataset is optional in fresh checkouts");
-        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        SqlRepository jdbc = mock(SqlRepository.class);
         var service = new ExperimentService(dataset.toString(), jdbc, new ObjectMapper());
         var first = service.evaluate();
         var second = service.evaluate();

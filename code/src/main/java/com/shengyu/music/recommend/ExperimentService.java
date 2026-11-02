@@ -12,7 +12,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,10 +22,10 @@ public class ExperimentService {
     private static final int MAX_ITEMS_PER_USER = 60;
     private static final int SEED = 20261023;
     private final Path dataset;
-    private final JdbcTemplate jdbc;
+    private final SqlRepository jdbc;
     private final ObjectMapper json;
     public ExperimentService(@Value("${music.experiment.dataset-path:../data/hetrec2011-lastfm-2k.zip}") String datasetPath,
-        JdbcTemplate jdbc, ObjectMapper json) { this.dataset = Path.of(datasetPath).toAbsolutePath().normalize(); this.jdbc = jdbc; this.json = json; }
+        SqlRepository jdbc, ObjectMapper json) { this.dataset = Path.of(datasetPath).toAbsolutePath().normalize(); this.jdbc = jdbc; this.json = json; }
 
     public List<Map<String, Object>> evaluate() {
         if (!Files.isRegularFile(dataset)) throw new ApiException(HttpStatus.BAD_REQUEST, "找不到 Last.fm 数据集 ZIP，请设置 MUSIC_EXPERIMENT_DATASET_PATH");

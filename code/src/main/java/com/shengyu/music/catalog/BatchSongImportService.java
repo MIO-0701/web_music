@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,8 +27,8 @@ public class BatchSongImportService {
     public static final List<String> GENRES = List.of("pop", "rock", "alternative", "rnb-soul", "hip-hop", "electronic", "dance", "jazz", "classical", "folk", "singer-songwriter", "soundtrack", "anime", "country", "metal", "blues", "reggae", "latin", "instrumental", "new-age");
     private static final List<String> COLUMNS = List.of("title", "artist", "album", "audio_file", "cover_file", "language", "genre", "vip");
     private final CatalogAdminService admin;
-    private final JdbcTemplate jdbc;
-    public BatchSongImportService(CatalogAdminService admin, JdbcTemplate jdbc) { this.admin = admin; this.jdbc = jdbc; }
+    private final SqlRepository jdbc;
+    public BatchSongImportService(CatalogAdminService admin, SqlRepository jdbc) { this.admin = admin; this.jdbc = jdbc; }
 
     public Map<String, Object> upload(MultipartFile audioZip, MultipartFile coverZip, MultipartFile csv) throws Exception {
         checkFile(audioZip, ".zip", 400_000_000L); checkFile(coverZip, ".zip", 400_000_000L); checkFile(csv, ".csv", 1_000_000L);

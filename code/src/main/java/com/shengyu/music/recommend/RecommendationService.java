@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,10 +21,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class RecommendationService {
     private static final Logger log = LoggerFactory.getLogger(RecommendationService.class);
-    private final JdbcTemplate jdbc;
+    private final SqlRepository jdbc;
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
-    public RecommendationService(JdbcTemplate jdbc, StringRedisTemplate redis, ObjectMapper json) { this.jdbc = jdbc; this.redis = redis; this.json = json; }
+    public RecommendationService(SqlRepository jdbc, StringRedisTemplate redis, ObjectMapper json) { this.jdbc = jdbc; this.redis = redis; this.json = json; }
 
     public List<Map<String, Object>> mine(String algorithm) {
         if (!List.of("TAG", "ITEM_CF").contains(algorithm)) throw ApiException.badRequest("推荐算法须为 TAG 或 ITEM_CF");
@@ -45,10 +45,10 @@ public class RecommendationService {
         long user = AuthService.current().id();
         String key = "recommend:daily:" + user + ":" + LocalDate.now(ZoneId.of("Asia/Shanghai"));
         try { String cached = redis.opsForValue().get(key); if (cached != null) return json.readValue(cached, new TypeReference<>() {}); } catch (Exception ignored) { }
-        var yesterday = jdbc.query("SELECT song_id,SUM(weight) weight FROM (" +
+        var yesterday = jdbc.queryForList("SELECT song_id,SUM(weight) weight FROM (" +
             "SELECT song_id,LEAST(COUNT(*),5)*1.0 weight FROM play_events WHERE user_id=? AND seconds_played>=10 AND created_at>=CURDATE()-INTERVAL 1 DAY AND created_at<CURDATE() GROUP BY song_id " +
             "UNION ALL SELECT song_id,3.0 weight FROM favorites WHERE user_id=? AND created_at>=CURDATE()-INTERVAL 1 DAY AND created_at<CURDATE()) x GROUP BY song_id",
-            (rs, row) -> new RecommendationEngine.Interaction(user, rs.getLong("song_id"), rs.getDouble("weight")), user, user);
+            user, user).stream().map(row -> new RecommendationEngine.Interaction(user, ((Number) row.get("song_id")).longValue(), ((Number) row.get("weight")).doubleValue())).toList();
         List<Map<String, Object>> rows;
         if (yesterday.isEmpty()) {
             rows = jdbc.queryForList("SELECT s.id,s.title,s.artist,s.album_name,s.genre,s.language_code,s.duration_seconds,s.vip," +
@@ -117,7 +117,7 @@ public class RecommendationService {
         String sql = "SELECT user_id,song_id,SUM(weight) weight FROM (" +
             "SELECT user_id,song_id,LEAST(COUNT(*),5) * 1.0 weight FROM play_events WHERE seconds_played>=10 GROUP BY user_id,song_id " +
             "UNION ALL SELECT user_id,song_id,3.0 weight FROM favorites) x GROUP BY user_id,song_id";
-        return jdbc.query(sql, (rs, row) -> new RecommendationEngine.Interaction(rs.getLong("user_id"), rs.getLong("song_id"), rs.getDouble("weight")));
+        return jdbc.queryForList(sql).stream().map(row -> new RecommendationEngine.Interaction(((Number) row.get("user_id")).longValue(), ((Number) row.get("song_id")).longValue(), ((Number) row.get("weight")).doubleValue())).toList();
     }
 
     private void save(long user, String algorithm, List<RecommendationEngine.Ranked> ranked, LocalDateTime now) {

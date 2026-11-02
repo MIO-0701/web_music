@@ -10,7 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 class AuthServiceTest {
@@ -23,7 +23,7 @@ class AuthServiceTest {
     }
 
     private void verifyMembership(Object expiry) {
-        var jdbc = mock(JdbcTemplate.class);
+        var jdbc = mock(SqlRepository.class);
         var redis = mock(StringRedisTemplate.class);
         @SuppressWarnings("unchecked") var values = (ValueOperations<String, String>) mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(values);

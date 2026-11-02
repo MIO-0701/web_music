@@ -8,14 +8,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
-    private final JdbcTemplate jdbc;
-    public AdminController(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final SqlRepository jdbc;
+    public AdminController(SqlRepository jdbc) { this.jdbc = jdbc; }
 
     @GetMapping("/users") public PageResult<Map<String, Object>> users(@RequestParam(required = false) String keyword,
         @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {

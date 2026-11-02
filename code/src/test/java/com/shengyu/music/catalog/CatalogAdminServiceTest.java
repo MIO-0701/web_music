@@ -10,8 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 
 class CatalogAdminServiceTest {
     @Test void htmlDisguisedAsMp3IsRejectedBeforeStorage() throws Exception {
@@ -20,7 +19,7 @@ class CatalogAdminServiceTest {
             Files.writeString(fake, "<!DOCTYPE html><html><body>download error</body></html>");
             var storage = mock(MediaStorage.class);
             var previews = mock(PreviewGenerator.class);
-            var service = new CatalogAdminService(mock(JdbcTemplate.class), mock(NamedParameterJdbcTemplate.class),
+            var service = new CatalogAdminService(mock(SqlRepository.class),
                 storage, previews, mock(CatalogService.class));
             var error = assertThrows(ApiException.class,
                 () -> service.add(fake, null, "测试歌曲", "测试歌手", "", "cn", "未分类", false, null, List.of()));

@@ -10,21 +10,17 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AiSearchService {
-    private final JdbcTemplate jdbc;
-    private final NamedParameterJdbcTemplate named;
+    private final SqlRepository jdbc;
     private final ObjectMapper json;
     private final StringRedisTemplate redis;
     private final DeepSeekClient deepSeek;
-    public AiSearchService(JdbcTemplate jdbc, NamedParameterJdbcTemplate named, ObjectMapper json, StringRedisTemplate redis, DeepSeekClient deepSeek) {
-        this.jdbc = jdbc; this.named = named; this.json = json; this.redis = redis; this.deepSeek = deepSeek;
+    public AiSearchService(SqlRepository jdbc, ObjectMapper json, StringRedisTemplate redis, DeepSeekClient deepSeek) {
+        this.jdbc = jdbc; this.json = json; this.redis = redis; this.deepSeek = deepSeek;
     }
 
     public List<Map<String, Object>> conversations() {
@@ -83,9 +79,7 @@ public class AiSearchService {
     }
 
     private long createConversation(long user, String title) {
-        var keys = new GeneratedKeyHolder();
-        named.update("INSERT INTO ai_conversations(user_id,title) VALUES(:user,:title)", new MapSqlParameterSource("user", user).addValue("title", safe(title, 100)), keys);
-        return Objects.requireNonNull(keys.getKey()).longValue();
+        return jdbc.insertAndReturnId("INSERT INTO ai_conversations(user_id,title) VALUES(?,?)", user, safe(title, 100));
     }
     private void requireOwner(long id) {
         if (jdbc.queryForObject("SELECT COUNT(*) FROM ai_conversations WHERE id=? AND user_id=?", Long.class, id, AuthService.current().id()) == 0)

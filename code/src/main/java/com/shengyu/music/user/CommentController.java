@@ -9,16 +9,16 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.util.Map;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/songs/{songId}/comments")
 public class CommentController {
-    private final JdbcTemplate jdbc;
+    private final SqlRepository jdbc;
     private final CatalogService catalog;
-    public CommentController(JdbcTemplate jdbc, CatalogService catalog) { this.jdbc = jdbc; this.catalog = catalog; }
+    public CommentController(SqlRepository jdbc, CatalogService catalog) { this.jdbc = jdbc; this.catalog = catalog; }
     public record CommentRequest(@NotBlank @Size(max = 1000) String content) {}
 
     @GetMapping public PageResult<Map<String, Object>> list(@PathVariable long songId,

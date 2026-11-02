@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -20,12 +20,12 @@ public class LocalCatalogImporter implements ApplicationRunner {
     private final boolean enabled;
     private final Path musicRoot, imageRoot;
     private final ObjectMapper json;
-    private final JdbcTemplate jdbc;
+    private final SqlRepository jdbc;
     private final CatalogAdminService admin;
     public LocalCatalogImporter(@Value("${music.import.enabled:false}") boolean enabled,
         @Value("${music.import.music-dir:../music}") String musicDir,
         @Value("${music.import.image-dir:../img}") String imageDir,
-        ObjectMapper json, JdbcTemplate jdbc, CatalogAdminService admin) {
+        ObjectMapper json, SqlRepository jdbc, CatalogAdminService admin) {
         this.enabled = enabled; this.musicRoot = Path.of(musicDir).toAbsolutePath().normalize();
         this.imageRoot = Path.of(imageDir).toAbsolutePath().normalize();
         this.json = json; this.jdbc = jdbc; this.admin = admin;

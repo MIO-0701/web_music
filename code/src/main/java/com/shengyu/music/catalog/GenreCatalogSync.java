@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.stereotype.Component;
 
 /** Applies reviewed offline genre metadata after the optional local music import. */
@@ -18,11 +18,11 @@ public class GenreCatalogSync {
     private static final Logger log = LoggerFactory.getLogger(GenreCatalogSync.class);
     private final Path catalogPath;
     private final ObjectMapper json;
-    private final JdbcTemplate jdbc;
+    private final SqlRepository jdbc;
     private final CatalogService catalog;
 
     public GenreCatalogSync(@Value("${music.genre-catalog-path:../data/song-genres.json}") String path,
-        ObjectMapper json, JdbcTemplate jdbc, CatalogService catalog) {
+        ObjectMapper json, SqlRepository jdbc, CatalogService catalog) {
         this.catalogPath = Path.of(path).toAbsolutePath().normalize();
         this.json = json; this.jdbc = jdbc; this.catalog = catalog;
     }

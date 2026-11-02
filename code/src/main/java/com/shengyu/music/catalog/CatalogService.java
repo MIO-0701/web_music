@@ -7,15 +7,15 @@ import com.shengyu.music.common.PageResult;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.stereotype.Service;
 
 @Service
 public class CatalogService {
-    private final JdbcTemplate jdbc;
+    private final SqlRepository jdbc;
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
-    public CatalogService(JdbcTemplate jdbc, StringRedisTemplate redis, ObjectMapper json) { this.jdbc = jdbc; this.redis = redis; this.json = json; }
+    public CatalogService(SqlRepository jdbc, StringRedisTemplate redis, ObjectMapper json) { this.jdbc = jdbc; this.redis = redis; this.json = json; }
 
     public PageResult<Map<String, Object>> search(String keyword, String genre, String language, Boolean vip, int page, int size, boolean admin) {
         int p = PageResult.safePage(page), s = PageResult.safeSize(size);

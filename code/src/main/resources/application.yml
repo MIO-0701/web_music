@@ -23,6 +23,9 @@ spring:
     scheduling:
       pool:
         size: 2
+mybatis-plus:
+  configuration:
+    call-setters-on-nulls: true
 music:
   genre-catalog-path: ${MUSIC_GENRE_CATALOG_PATH:../data/song-genres.json}
   cors-origin: ${CORS_ORIGIN:http://localhost:5173}

@@ -6,13 +6,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Configuration
 public class AdminBootstrap {
     private static final Logger log = LoggerFactory.getLogger(AdminBootstrap.class);
-    @Bean ApplicationRunner createInitialAdmin(JdbcTemplate jdbc, PasswordEncoder passwords,
+    @Bean ApplicationRunner createInitialAdmin(SqlRepository jdbc, PasswordEncoder passwords,
         @Value("${music.admin.username:}") String username, @Value("${music.admin.password:}") String password) {
         return args -> {
             if (username.isBlank() || password.isBlank()) { log.warn("ADMIN_USERNAME / ADMIN_PASSWORD not set; no initial administrator will be created"); return; }

@@ -15,21 +15,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
+import com.shengyu.music.common.SqlRepository;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/me")
 public class UserMusicController {
-    private final JdbcTemplate jdbc;
-    private final NamedParameterJdbcTemplate named;
+    private final SqlRepository jdbc;
     private final StringRedisTemplate redis;
     private final CatalogService catalog;
-    public UserMusicController(JdbcTemplate jdbc, NamedParameterJdbcTemplate named, StringRedisTemplate redis, CatalogService catalog) {
-        this.jdbc = jdbc; this.named = named; this.redis = redis; this.catalog = catalog;
+    public UserMusicController(SqlRepository jdbc, StringRedisTemplate redis, CatalogService catalog) {
+        this.jdbc = jdbc; this.redis = redis; this.catalog = catalog;
     }
 
     @GetMapping("/favorites") public PageResult<Map<String, Object>> favorites(@RequestParam(required = false) String keyword,
@@ -66,9 +62,8 @@ public class UserMusicController {
             "FROM playlists p LEFT JOIN playlist_songs ps ON ps.playlist_id=p.id LEFT JOIN songs visible ON visible.id=ps.song_id AND visible.published=TRUE WHERE p.user_id=? GROUP BY p.id,p.name,p.description,p.created_at ORDER BY p.id DESC", AuthService.current().id());
     }
     @PostMapping("/playlists") public Map<String, Object> createPlaylist(@Valid @RequestBody PlaylistRequest body) {
-        var keys = new GeneratedKeyHolder();
-        named.update("INSERT INTO playlists(user_id,name,description) VALUES(:user,:name,:description)", new MapSqlParameterSource("user", AuthService.current().id()).addValue("name", body.name().trim()).addValue("description", body.description() == null ? "" : body.description().trim()), keys);
-        return Map.of("id", Objects.requireNonNull(keys.getKey()).longValue());
+        long id = jdbc.insertAndReturnId("INSERT INTO playlists(user_id,name,description) VALUES(?,?,?)", AuthService.current().id(), body.name().trim(), body.description() == null ? "" : body.description().trim());
+        return Map.of("id", id);
     }
     @GetMapping("/playlists/{id}") public Map<String, Object> playlist(@PathVariable long id) {
         requirePlaylistOwner(id);
@@ -94,8 +89,10 @@ public class UserMusicController {
         requirePlaylistOwner(id);
         if (songIds.isEmpty()) return Map.of("removed", 0);
         if (songIds.size() > 200) throw ApiException.badRequest("一次最多移除 200 首歌曲");
-        int removed = named.update("DELETE FROM playlist_songs WHERE playlist_id=:playlist AND song_id IN (:songs)",
-            new MapSqlParameterSource("playlist", id).addValue("songs", songIds));
+        String placeholders = String.join(",", java.util.Collections.nCopies(songIds.size(), "?"));
+        var args = new java.util.ArrayList<Object>();
+        args.add(id); args.addAll(songIds);
+        int removed = jdbc.update("DELETE FROM playlist_songs WHERE playlist_id=? AND song_id IN (" + placeholders + ")", args.toArray());
         return Map.of("removed", removed);
     }
     private void requirePlaylistOwner(long id) {
@@ -136,7 +133,7 @@ public class UserMusicController {
         String filter = keyword.isBlank() ? "" : " AND (LOWER(s.title) LIKE ? OR LOWER(s.artist) LIKE ? OR LOWER(s.album_name) LIKE ?)";
         String term = "%" + keyword.trim().toLowerCase(java.util.Locale.ROOT) + "%";
         Object[] countArgs = filter.isEmpty() ? new Object[]{user} : new Object[]{user, term, term, term};
-        long total = jdbc.queryForObject("SELECT COUNT(DISTINCT e.song_id) FROM play_events e JOIN songs s ON s.id=e.song_id WHERE e.user_id=? AND s.published=TRUE" + filter, Long.class, countArgs);
+        long total = jdbc.queryForObject("SELECT COUNT(DISTINCT e.song_id) AS total FROM play_events e JOIN songs s ON s.id=e.song_id WHERE e.user_id=? AND s.published=TRUE" + filter, Long.class, countArgs);
         Object[] rowArgs = filter.isEmpty() ? new Object[]{user, s, (p - 1) * s} : new Object[]{user, term, term, term, s, (p - 1) * s};
         var rows = jdbc.queryForList("SELECT e.id event_id,e.seconds_played,e.completed,e.created_at,s.id song_id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip " +
             "FROM (SELECT song_id,MAX(id) latest_id FROM play_events WHERE user_id=? GROUP BY song_id) latest " +
