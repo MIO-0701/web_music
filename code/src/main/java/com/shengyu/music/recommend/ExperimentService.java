@@ -12,7 +12,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
-import com.shengyu.music.common.SqlRepository;
+import com.shengyu.music.persistence.RecommendationExperiments;
+import com.shengyu.music.persistence.RecommendationExperimentsMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,10 +24,14 @@ public class ExperimentService {
     private static final int MAX_ITEMS_PER_USER = 60;
     private static final int SEED = 20261023;
     private final Path dataset;
-    private final SqlRepository jdbc;
+    private final RecommendationExperimentsMapper experimentsMapper;
     private final ObjectMapper json;
     public ExperimentService(@Value("${music.experiment.dataset-path:../data/hetrec2011-lastfm-2k.zip}") String datasetPath,
-        SqlRepository jdbc, ObjectMapper json) { this.dataset = Path.of(datasetPath).toAbsolutePath().normalize(); this.jdbc = jdbc; this.json = json; }
+        RecommendationExperimentsMapper experimentsMapper, ObjectMapper json) { this.dataset = Path.of(datasetPath).toAbsolutePath().normalize(); this.experimentsMapper = experimentsMapper; this.json = json; }
+
+    public List<Map<String, Object>> experiments() {
+        return experimentsMapper.selectMaps(Wrappers.<RecommendationExperiments>query().orderByDesc("id").last("LIMIT 20"));
+    }
 
     public List<Map<String, Object>> evaluate() {
         if (!Files.isRegularFile(dataset)) throw new ApiException(HttpStatus.BAD_REQUEST, "找不到 Last.fm 数据集 ZIP，请设置 MUSIC_EXPERIMENT_DATASET_PATH");
@@ -58,8 +64,14 @@ public class ExperimentService {
             List<Map<String, Object>> result = new ArrayList<>();
             result.add(measure("TAG", users, heldout, candidates, user -> RecommendationEngine.byTags(user, candidates, training, tags, popularity, 10)));
             result.add(measure("ITEM_CF", users, heldout, candidates, user -> RecommendationEngine.itemCollaborative(user, candidates, training, popularity, model, 10)));
-            for (var row : result) jdbc.update("INSERT INTO recommendation_experiments(algorithm,dataset,precision_at_10,recall_at_10,coverage,evaluated_users,details) VALUES(?,?,?,?,?,?,?)",
-                row.get("algorithm"), row.get("dataset"), row.get("precisionAt10"), row.get("recallAt10"), row.get("coverage"), row.get("evaluatedUsers"), json.writeValueAsString(Map.of("seed", SEED, "maxArtists", MAX_ARTISTS, "maxUsers", MAX_USERS, "maxItemsPerUser", MAX_ITEMS_PER_USER, "holdout", "20% per user, minimum 1", "itemLevel", "artist")));
+            for (var row : result) {
+                RecommendationExperiments entry = new RecommendationExperiments();
+                entry.algorithm = (String) row.get("algorithm"); entry.dataset = (String) row.get("dataset");
+                entry.precisionAt_10 = ((Number) row.get("precisionAt10")).doubleValue(); entry.recallAt_10 = ((Number) row.get("recallAt10")).doubleValue();
+                entry.coverage = ((Number) row.get("coverage")).doubleValue(); entry.evaluatedUsers = ((Number) row.get("evaluatedUsers")).intValue();
+                entry.details = json.writeValueAsString(Map.of("seed", SEED, "maxArtists", MAX_ARTISTS, "maxUsers", MAX_USERS, "maxItemsPerUser", MAX_ITEMS_PER_USER, "holdout", "20% per user, minimum 1", "itemLevel", "artist"));
+                experimentsMapper.insert(entry);
+            }
             return result;
         } catch (ApiException ex) { throw ex; }
         catch (Exception ex) { throw new ApiException(HttpStatus.BAD_REQUEST, "数据集读取或实验计算失败：" + ex.getMessage()); }

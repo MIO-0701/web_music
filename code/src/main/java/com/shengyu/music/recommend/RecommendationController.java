@@ -2,15 +2,13 @@ package com.shengyu.music.recommend;
 
 import java.util.List;
 import java.util.Map;
-import com.shengyu.music.common.SqlRepository;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 public class RecommendationController {
     private final RecommendationService recommendations;
-    private final SqlRepository jdbc;
     private final ExperimentService experiment;
-    public RecommendationController(RecommendationService recommendations, SqlRepository jdbc, ExperimentService experiment) { this.recommendations = recommendations; this.jdbc = jdbc; this.experiment = experiment; }
+    public RecommendationController(RecommendationService recommendations, ExperimentService experiment) { this.recommendations = recommendations; this.experiment = experiment; }
     @GetMapping("/api/me/recommendations") public List<Map<String, Object>> mine(@RequestParam(defaultValue = "TAG") String algorithm) {
         return recommendations.mine(algorithm.toUpperCase());
     }
@@ -21,7 +19,7 @@ public class RecommendationController {
         return Map.of("usersProcessed", recommendations.rebuild());
     }
     @GetMapping("/api/admin/recommendations/experiments") public List<Map<String, Object>> experiments() {
-        return jdbc.queryForList("SELECT id,algorithm,dataset,precision_at_10,recall_at_10,coverage,evaluated_users,details,created_at FROM recommendation_experiments ORDER BY id DESC LIMIT 20");
+        return experiment.experiments();
     }
     @PostMapping("/api/admin/recommendations/evaluate") public List<Map<String, Object>> evaluate() { return experiment.evaluate(); }
 }

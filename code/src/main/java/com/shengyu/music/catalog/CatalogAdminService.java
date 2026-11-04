@@ -8,7 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.http.HttpStatus;
-import com.shengyu.music.common.SqlRepository;
+import com.shengyu.music.persistence.*;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -19,12 +20,14 @@ import org.slf4j.LoggerFactory;
 @Service
 public class CatalogAdminService {
     private static final Logger log = LoggerFactory.getLogger(CatalogAdminService.class);
-    private final SqlRepository jdbc;
+    private final SongsMapper songs;
+    private final SongTagsMapper songTags;
+    private final SongTagLinksMapper tagLinks;
     private final MediaStorage storage;
     private final PreviewGenerator previews;
     private final CatalogService catalog;
-    public CatalogAdminService(SqlRepository jdbc, MediaStorage storage, PreviewGenerator previews, CatalogService catalog) {
-        this.jdbc = jdbc; this.storage = storage; this.previews = previews; this.catalog = catalog;
+    public CatalogAdminService(SongsMapper songs, SongTagsMapper songTags, SongTagLinksMapper tagLinks, MediaStorage storage, PreviewGenerator previews, CatalogService catalog) {
+        this.songs = songs; this.songTags = songTags; this.tagLinks = tagLinks; this.storage = storage; this.previews = previews; this.catalog = catalog;
     }
 
     @Transactional
@@ -45,10 +48,11 @@ public class CatalogAdminService {
         }
         String audioKey = storage.put(audio, "audio", "mp3");
         String coverKey = cover == null ? null : storage.put(cover, "covers", extension(cover));
-        long id = jdbc.insertAndReturnId("INSERT INTO songs(title,artist,album_name,language_code,genre,audio_key,preview_key,cover_key,source_path,duration_seconds,vip,published) " +
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,TRUE)", title.trim(), artist.trim(), album == null ? "" : album.trim(),
-            language == null ? "other" : language, genre == null ? "未分类" : genre.trim(), audioKey,
-            previewKey, coverKey, sourcePath, duration, vip);
+        Songs song = new Songs(); song.title = title.trim(); song.artist = artist.trim(); song.albumName = album == null ? "" : album.trim();
+        song.languageCode = language == null ? "other" : language; song.genre = genre == null ? "未分类" : genre.trim();
+        song.audioKey = audioKey; song.previewKey = previewKey; song.coverKey = coverKey; song.sourcePath = sourcePath;
+        song.durationSeconds = duration; song.vip = vip; song.published = true; songs.insert(song);
+        long id = song.id;
         setTags(id, tags == null ? List.of() : tags);
         catalog.invalidateHot();
         return id;
@@ -68,13 +72,14 @@ public class CatalogAdminService {
                 temp = Files.createTempFile("shengyu-vip-", ".mp3");
                 try (var input = storage.read(audioKey, 0, -1)) { Files.copy(input, temp, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
                 Path preview = previews.generate(temp);
-                try { String previewKey = storage.put(preview, "previews", "mp3"); jdbc.update("UPDATE songs SET preview_key=? WHERE id=?", previewKey, id); }
+                try { String previewKey = storage.put(preview, "previews", "mp3"); songs.update(null, Wrappers.<Songs>update().eq("id", id).set("preview_key", previewKey)); }
                 finally { Files.deleteIfExists(preview); }
             } catch (Exception ex) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "生成试听文件失败"); }
             finally { if (temp != null) try { Files.deleteIfExists(temp); } catch (Exception ignored) { } }
         }
-        jdbc.update("UPDATE songs SET title=?,artist=?,album_name=?,genre=?,description=?,vip=?,published=? WHERE id=?",
-            title.trim(), artist.trim(), album == null ? "" : album.trim(), genre == null ? "未分类" : genre.trim(), description, vip, published, id);
+        songs.update(null, Wrappers.<Songs>update().eq("id", id).set("title", title.trim()).set("artist", artist.trim())
+            .set("album_name", album == null ? "" : album.trim()).set("genre", genre == null ? "未分类" : genre.trim())
+            .set("description", description).set("vip", vip).set("published", published));
         setTags(id, tags == null ? List.of() : tags);
         catalog.invalidateHot();
     }
@@ -85,7 +90,7 @@ public class CatalogAdminService {
             throw ApiException.badRequest("音频内容无效，不能上架");
         if (published && Boolean.TRUE.equals(row.get("vip")) && row.get("preview_key") == null)
             throw ApiException.badRequest("会员歌曲必须先生成试听文件");
-        jdbc.update("UPDATE songs SET published=? WHERE id=?", published, id);
+        songs.update(null, Wrappers.<Songs>update().eq("id", id).set("published", published));
         catalog.invalidateHot();
     }
 
@@ -99,7 +104,7 @@ public class CatalogAdminService {
         if ("DELETE".equals(action)) {
             var keys = rows.stream().flatMap(row -> java.util.stream.Stream.of(row.get("audio_key"), row.get("preview_key"), row.get("cover_key")))
                 .filter(Objects::nonNull).map(String::valueOf).toList();
-            for (long id : unique) jdbc.update("DELETE FROM songs WHERE id=?", id);
+            for (long id : unique) songs.deleteById(id);
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCommit() {
                     for (String key : keys) try { storage.delete(key); }
@@ -107,9 +112,9 @@ public class CatalogAdminService {
                 }
             });
         } else if ("UNPUBLISH".equals(action)) {
-            for (long id : unique) jdbc.update("UPDATE songs SET published=FALSE WHERE id=?", id);
+            for (long id : unique) songs.update(null, Wrappers.<Songs>update().eq("id", id).set("published", false));
         } else if ("CLEAR_VIP".equals(action)) {
-            for (long id : unique) jdbc.update("UPDATE songs SET vip=FALSE WHERE id=?", id);
+            for (long id : unique) songs.update(null, Wrappers.<Songs>update().eq("id", id).set("vip", false));
         } else {
             for (var row : rows) {
                 long id = ((Number) row.get("id")).longValue();
@@ -119,12 +124,12 @@ public class CatalogAdminService {
                         audio = Files.createTempFile("shengyu-batch-vip-", ".mp3");
                         try (var input = storage.read((String) row.get("audio_key"), 0, -1)) { Files.copy(input, audio, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
                         Path preview = previews.generate(audio);
-                        try { jdbc.update("UPDATE songs SET preview_key=? WHERE id=?", storage.put(preview, "previews", "mp3"), id); }
+                        try { songs.update(null, Wrappers.<Songs>update().eq("id", id).set("preview_key", storage.put(preview, "previews", "mp3"))); }
                         finally { Files.deleteIfExists(preview); }
                     } catch (Exception ex) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "歌曲 " + id + " 生成试听文件失败"); }
                     finally { if (audio != null) try { Files.deleteIfExists(audio); } catch (Exception ignored) { } }
                 }
-                jdbc.update("UPDATE songs SET vip=TRUE WHERE id=?", id);
+                songs.update(null, Wrappers.<Songs>update().eq("id", id).set("vip", true));
             }
         }
         catalog.invalidateHot();
@@ -132,12 +137,12 @@ public class CatalogAdminService {
     }
 
     private void setTags(long songId, List<String> tags) {
-        jdbc.update("DELETE FROM song_tag_links WHERE song_id=?", songId);
+        tagLinks.delete(Wrappers.<SongTagLinks>query().eq("song_id", songId));
         for (String raw : tags.stream().filter(Objects::nonNull).map(String::trim).filter(s -> !s.isBlank()).distinct().limit(12).toList()) {
             if (raw.length() > 60) throw ApiException.badRequest("标签过长");
-            jdbc.update("INSERT IGNORE INTO song_tags(name) VALUES(?)", raw);
-            Long tagId = jdbc.queryForObject("SELECT id FROM song_tags WHERE name=?", Long.class, raw);
-            jdbc.update("INSERT IGNORE INTO song_tag_links(song_id,tag_id) VALUES(?,?)", songId, tagId);
+            songTags.insertIgnore(raw);
+            SongTags tag = songTags.selectOne(Wrappers.<SongTags>query().eq("name", raw));
+            tagLinks.insertIgnore(songId, tag.id);
         }
     }
 

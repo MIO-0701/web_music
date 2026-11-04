@@ -8,14 +8,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
-import com.shengyu.music.common.SqlRepository;
+import com.shengyu.music.persistence.RecommendationExperimentsMapper;
 
 class ExperimentDatasetTest {
     @Test void officialDatasetProducesReproducibleBoundedMetrics() {
         Path dataset = Path.of("../data/hetrec2011-lastfm-2k.zip").toAbsolutePath().normalize();
         assumeTrue(Files.isRegularFile(dataset), "Official dataset is optional in fresh checkouts");
-        SqlRepository jdbc = mock(SqlRepository.class);
-        var service = new ExperimentService(dataset.toString(), jdbc, new ObjectMapper());
+        RecommendationExperimentsMapper experiments = mock(RecommendationExperimentsMapper.class);
+        var service = new ExperimentService(dataset.toString(), experiments, new ObjectMapper());
         var first = service.evaluate();
         var second = service.evaluate();
         assertThat(first).isEqualTo(second);
@@ -26,7 +26,7 @@ class ExperimentDatasetTest {
             assertThat((double) row.get("coverage")).isBetween(0d, 1d);
             assertThat((int) row.get("evaluatedUsers")).isPositive();
         });
-        verify(jdbc, times(4)).update(startsWith("INSERT INTO recommendation_experiments"), any(), any(), any(), any(), any(), any(), any());
+        verify(experiments, times(4)).insert(any());
         System.out.println("Official Last.fm experiment: " + first);
     }
 }

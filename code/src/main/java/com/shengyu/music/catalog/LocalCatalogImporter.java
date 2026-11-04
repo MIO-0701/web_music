@@ -11,7 +11,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import com.shengyu.music.common.SqlRepository;
+import com.shengyu.music.persistence.Songs;
+import com.shengyu.music.persistence.SongsMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -20,15 +22,15 @@ public class LocalCatalogImporter implements ApplicationRunner {
     private final boolean enabled;
     private final Path musicRoot, imageRoot;
     private final ObjectMapper json;
-    private final SqlRepository jdbc;
+    private final SongsMapper songsMapper;
     private final CatalogAdminService admin;
     public LocalCatalogImporter(@Value("${music.import.enabled:false}") boolean enabled,
         @Value("${music.import.music-dir:../music}") String musicDir,
         @Value("${music.import.image-dir:../img}") String imageDir,
-        ObjectMapper json, SqlRepository jdbc, CatalogAdminService admin) {
+        ObjectMapper json, SongsMapper songsMapper, CatalogAdminService admin) {
         this.enabled = enabled; this.musicRoot = Path.of(musicDir).toAbsolutePath().normalize();
         this.imageRoot = Path.of(imageDir).toAbsolutePath().normalize();
-        this.json = json; this.jdbc = jdbc; this.admin = admin;
+        this.json = json; this.songsMapper = songsMapper; this.admin = admin;
     }
 
     @Override public void run(ApplicationArguments args) throws Exception {
@@ -44,7 +46,7 @@ public class LocalCatalogImporter implements ApplicationRunner {
             String artist = entry.path("artist").asText();
             String source = category + "/" + file;
             if (!"matched".equals(entry.path("status").asText()) || title.isBlank() || "null".equalsIgnoreCase(title) || artist.isBlank()) { skipped++; continue; }
-            if (jdbc.queryForObject("SELECT COUNT(*) FROM songs WHERE source_path=?", Long.class, source) > 0) { skipped++; continue; }
+            if (songsMapper.selectCount(Wrappers.<Songs>query().eq("source_path", source)) > 0) { skipped++; continue; }
             Path audio = musicRoot.resolve(source).normalize();
             if (!audio.startsWith(musicRoot) || !Files.isRegularFile(audio)) { failures.add(source + " (音频缺失)"); failed++; continue; }
             String image = entry.path("image").asText();

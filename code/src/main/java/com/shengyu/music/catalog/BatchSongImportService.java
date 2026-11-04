@@ -18,7 +18,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
-import com.shengyu.music.common.SqlRepository;
+import com.shengyu.music.persistence.Songs;
+import com.shengyu.music.persistence.SongsMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,8 +29,8 @@ public class BatchSongImportService {
     public static final List<String> GENRES = List.of("pop", "rock", "alternative", "rnb-soul", "hip-hop", "electronic", "dance", "jazz", "classical", "folk", "singer-songwriter", "soundtrack", "anime", "country", "metal", "blues", "reggae", "latin", "instrumental", "new-age");
     private static final List<String> COLUMNS = List.of("title", "artist", "album", "audio_file", "cover_file", "language", "genre", "vip");
     private final CatalogAdminService admin;
-    private final SqlRepository jdbc;
-    public BatchSongImportService(CatalogAdminService admin, SqlRepository jdbc) { this.admin = admin; this.jdbc = jdbc; }
+    private final SongsMapper songsMapper;
+    public BatchSongImportService(CatalogAdminService admin, SongsMapper songsMapper) { this.admin = admin; this.songsMapper = songsMapper; }
 
     public Map<String, Object> upload(MultipartFile audioZip, MultipartFile coverZip, MultipartFile csv) throws Exception {
         checkFile(audioZip, ".zip", 400_000_000L); checkFile(coverZip, ".zip", 400_000_000L); checkFile(csv, ".csv", 1_000_000L);
@@ -43,7 +45,7 @@ public class BatchSongImportService {
             for (Row row : rows) {
                 try {
                     String source = "batch/sha256/" + sha256(audio.get(row.audioFile));
-                    if (jdbc.queryForObject("SELECT COUNT(*) FROM songs WHERE source_path=?", Long.class, source) > 0) { skipped++; continue; }
+                    if (songsMapper.selectCount(Wrappers.<Songs>query().eq("source_path", source)) > 0) { skipped++; continue; }
                     created.add(admin.add(audio.get(row.audioFile), covers.get(row.coverFile), row.title, row.artist, row.album,
                         row.language, row.genre, row.vip, source, List.of(row.language, row.genre)));
                 } catch (Exception ex) { failures.add(Map.of("row", row.number, "file", row.audioFile, "error", ex.getMessage() == null ? "导入失败" : ex.getMessage())); }

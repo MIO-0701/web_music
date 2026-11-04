@@ -10,25 +10,29 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
-import com.shengyu.music.common.SqlRepository;
+import com.shengyu.music.persistence.*;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import java.time.LocalDateTime;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AiSearchService {
-    private final SqlRepository jdbc;
+    private final AiConversationsMapper conversations;
+    private final AiMessagesMapper messages;
+    private final SongsMapper songsMapper;
     private final ObjectMapper json;
     private final StringRedisTemplate redis;
     private final DeepSeekClient deepSeek;
-    public AiSearchService(SqlRepository jdbc, ObjectMapper json, StringRedisTemplate redis, DeepSeekClient deepSeek) {
-        this.jdbc = jdbc; this.json = json; this.redis = redis; this.deepSeek = deepSeek;
+    public AiSearchService(AiConversationsMapper conversations, AiMessagesMapper messages, SongsMapper songsMapper, ObjectMapper json, StringRedisTemplate redis, DeepSeekClient deepSeek) {
+        this.conversations = conversations; this.messages = messages; this.songsMapper = songsMapper; this.json = json; this.redis = redis; this.deepSeek = deepSeek;
     }
 
     public List<Map<String, Object>> conversations() {
-        return jdbc.queryForList("SELECT id,title,created_at,updated_at FROM ai_conversations WHERE user_id=? ORDER BY updated_at DESC LIMIT 50", AuthService.current().id());
+        return conversations.selectMaps(Wrappers.<AiConversations>query().select("id","title","created_at","updated_at").eq("user_id", AuthService.current().id()).orderByDesc("updated_at").last("LIMIT 50"));
     }
     public List<Map<String, Object>> messages(long conversationId) {
         requireOwner(conversationId);
-        return jdbc.queryForList("SELECT id,role,content,parsed_conditions,result_song_ids,status,created_at FROM ai_messages WHERE conversation_id=? ORDER BY id", conversationId);
+        return messages.selectMaps(Wrappers.<AiMessages>query().select("id","role","content","parsed_conditions","result_song_ids","status","created_at").eq("conversation_id", conversationId).orderByAsc("id"));
     }
 
     public Map<String, Object> chat(Long conversationId, String message) {
@@ -41,8 +45,8 @@ public class AiSearchService {
         if (used != null && used > 30) throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "今天的 AI 查歌次数已用完");
         long id = conversationId == null ? createConversation(user, text) : conversationId;
         if (conversationId != null) requireOwner(id);
-        jdbc.update("INSERT INTO ai_messages(conversation_id,role,content) VALUES(?,'USER',?)", id, text);
-        var recent = jdbc.queryForList("SELECT role,content FROM ai_messages WHERE conversation_id=? AND status='OK' ORDER BY id DESC LIMIT 6", id);
+        AiMessages userMessage = new AiMessages(); userMessage.conversationId = id; userMessage.role = "USER"; userMessage.content = text; messages.insert(userMessage);
+        var recent = messages.selectMaps(Wrappers.<AiMessages>query().select("role","content").eq("conversation_id", id).eq("status", "OK").orderByDesc("id").last("LIMIT 6"));
         Collections.reverse(recent);
         List<Map<String, String>> history = recent.stream().map(row -> Map.of("role", "USER".equals(row.get("role")) ? "user" : "assistant", "content", String.valueOf(row.get("content")))).toList();
         try {
@@ -52,38 +56,35 @@ public class AiSearchService {
             String language = safe(conditions.path("language").asText(""), 12);
             String artist = safe(conditions.path("artist").asText(""), 100);
             if (!List.of("", "cn", "en", "jp", "fr", "ru").contains(language)) language = "";
-            List<Object> args = new ArrayList<>();
-            StringBuilder sql = new StringBuilder("SELECT DISTINCT s.id,s.title,s.artist,s.album_name,s.genre,s.language_code,s.duration_seconds,s.vip,s.play_count FROM songs s LEFT JOIN song_tag_links st ON st.song_id=s.id LEFT JOIN song_tags t ON t.id=st.tag_id WHERE s.published=TRUE");
-            if (!keyword.isBlank()) { sql.append(" AND (s.title LIKE ? OR s.artist LIKE ? OR s.album_name LIKE ? OR s.description LIKE ? OR t.name LIKE ?)"); String value = "%" + keyword + "%"; for (int x = 0; x < 5; x++) args.add(value); }
-            if (!genre.isBlank()) { sql.append(" AND (s.genre LIKE ? OR t.name LIKE ?)"); args.add("%" + genre + "%"); args.add("%" + genre + "%"); }
-            if (!language.isBlank()) { sql.append(" AND s.language_code=?"); args.add(language); }
-            if (!artist.isBlank()) { sql.append(" AND s.artist LIKE ?"); args.add("%" + artist + "%"); }
-            sql.append(" ORDER BY s.play_count DESC,s.id DESC LIMIT 10");
-            var songs = jdbc.queryForList(sql.toString(), args.toArray());
+            var songs = songsMapper.aiSearch(keyword, genre, language, artist);
             songs.forEach(song -> song.put("coverUrl", "/api/songs/" + song.get("id") + "/cover"));
             String reply = safe(conditions.path("reply").asText("找到这些歌曲"), 200);
             if (reply.isBlank()) reply = "找到这些歌曲";
             if (songs.isEmpty()) reply = "本地曲库暂时没有符合描述的歌曲，可以换个说法试试。";
             List<Object> ids = songs.stream().map(song -> song.get("id")).toList();
-            jdbc.update("INSERT INTO ai_messages(conversation_id,role,content,parsed_conditions,result_song_ids,status) VALUES(?,'ASSISTANT',?,?,?,'OK')",
-                id, reply, json.writeValueAsString(Map.of("keyword", keyword, "genre", genre, "language", language, "artist", artist)), json.writeValueAsString(ids));
-            jdbc.update("UPDATE ai_conversations SET updated_at=NOW() WHERE id=?", id);
+            AiMessages response = new AiMessages(); response.conversationId = id; response.role = "ASSISTANT"; response.content = reply;
+            response.parsedConditions = json.writeValueAsString(Map.of("keyword", keyword, "genre", genre, "language", language, "artist", artist));
+            response.resultSongIds = json.writeValueAsString(ids); response.status = "OK"; messages.insert(response);
+            conversations.update(null, Wrappers.<AiConversations>update().eq("id", id).set("updated_at", LocalDateTime.now()));
             return Map.of("conversationId", id, "reply", reply, "conditions", Map.of("keyword", keyword, "genre", genre, "language", language, "artist", artist), "songs", songs);
         } catch (ApiException ex) {
-            jdbc.update("INSERT INTO ai_messages(conversation_id,role,content,status) VALUES(?,'ASSISTANT',?,'ERROR')", id, ex.getMessage());
+            saveError(id, ex.getMessage());
             throw ex;
         } catch (Exception ex) {
-            jdbc.update("INSERT INTO ai_messages(conversation_id,role,content,status) VALUES(?,'ASSISTANT',?,'ERROR')", id, "AI 查歌失败，请稍后重试");
+            saveError(id, "AI 查歌失败，请稍后重试");
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI 查歌失败，请稍后重试");
         }
     }
 
     private long createConversation(long user, String title) {
-        return jdbc.insertAndReturnId("INSERT INTO ai_conversations(user_id,title) VALUES(?,?)", user, safe(title, 100));
+        AiConversations conversation = new AiConversations(); conversation.userId = user; conversation.title = safe(title, 100); conversations.insert(conversation); return conversation.id;
     }
     private void requireOwner(long id) {
-        if (jdbc.queryForObject("SELECT COUNT(*) FROM ai_conversations WHERE id=? AND user_id=?", Long.class, id, AuthService.current().id()) == 0)
+        if (conversations.selectCount(Wrappers.<AiConversations>query().eq("id", id).eq("user_id", AuthService.current().id())) == 0)
             throw ApiException.notFound("会话不存在");
+    }
+    private void saveError(long id, String message) {
+        AiMessages error = new AiMessages(); error.conversationId = id; error.role = "ASSISTANT"; error.content = message; error.status = "ERROR"; messages.insert(error);
     }
     private static String safe(String value, int max) { return value == null ? "" : value.trim().substring(0, Math.min(value.trim().length(), max)); }
 }

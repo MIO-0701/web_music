@@ -9,7 +9,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import com.shengyu.music.common.SqlRepository;
+import com.shengyu.music.persistence.Songs;
+import com.shengyu.music.persistence.SongsMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Component;
 
 /** Applies reviewed offline genre metadata after the optional local music import. */
@@ -18,13 +20,13 @@ public class GenreCatalogSync {
     private static final Logger log = LoggerFactory.getLogger(GenreCatalogSync.class);
     private final Path catalogPath;
     private final ObjectMapper json;
-    private final SqlRepository jdbc;
+    private final SongsMapper songsMapper;
     private final CatalogService catalog;
 
     public GenreCatalogSync(@Value("${music.genre-catalog-path:../data/song-genres.json}") String path,
-        ObjectMapper json, SqlRepository jdbc, CatalogService catalog) {
+        ObjectMapper json, SongsMapper songsMapper, CatalogService catalog) {
         this.catalogPath = Path.of(path).toAbsolutePath().normalize();
-        this.json = json; this.jdbc = jdbc; this.catalog = catalog;
+        this.json = json; this.songsMapper = songsMapper; this.catalog = catalog;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -38,8 +40,8 @@ public class GenreCatalogSync {
         int updated = 0;
         for (JsonNode song : songs) {
             if (!"matched".equals(song.path("status").asText()) || song.path("genre").asText().isBlank()) continue;
-            updated += jdbc.update("UPDATE songs SET genre=? WHERE source_path=? AND genre='未分类'",
-                song.path("genre").asText(), song.path("sourcePath").asText());
+            updated += songsMapper.update(null, Wrappers.<Songs>update().set("genre", song.path("genre").asText())
+                .eq("source_path", song.path("sourcePath").asText()).eq("genre", "未分类"));
         }
         if (updated > 0) catalog.invalidateHot();
         log.info("Genre catalog checked {} entries, updated {} songs", songs.size(), updated);

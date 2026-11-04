@@ -15,131 +15,31 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import com.shengyu.music.common.SqlRepository;
 import org.springframework.web.bind.annotation.*;
 
+import com.shengyu.music.user.UserMusicService.*;
 @RestController
 @RequestMapping("/api/me")
 public class UserMusicController {
-    private final SqlRepository jdbc;
-    private final StringRedisTemplate redis;
-    private final CatalogService catalog;
-    public UserMusicController(SqlRepository jdbc, StringRedisTemplate redis, CatalogService catalog) {
-        this.jdbc = jdbc; this.redis = redis; this.catalog = catalog;
-    }
-
+    private final UserMusicService userMusicService;
+    public UserMusicController(UserMusicService service) { this.userMusicService = service; }
     @GetMapping("/favorites") public PageResult<Map<String, Object>> favorites(@RequestParam(required = false) String keyword,
-        @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
-        long user = AuthService.current().id(); int p = PageResult.safePage(page), s = PageResult.safeSize(size);
-        String where = " FROM favorites f JOIN songs s ON s.id=f.song_id WHERE f.user_id=? AND s.published=TRUE";
-        var args = new ArrayList<Object>(); args.add(user);
-        if (keyword != null && !keyword.isBlank()) {
-            where += " AND (s.title LIKE ? OR s.artist LIKE ? OR s.album_name LIKE ?)";
-            String term = "%" + keyword.trim() + "%";
-            args.add(term); args.add(term); args.add(term);
-        }
-        long total = jdbc.queryForObject("SELECT COUNT(*)" + where, Long.class, args.toArray());
-        args.add(s); args.add((p - 1) * s);
-        var rows = jdbc.queryForList("SELECT s.id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip,s.play_count,f.created_at" + where + " ORDER BY f.created_at DESC,s.id DESC LIMIT ? OFFSET ?", args.toArray());
-        rows.forEach(row -> row.put("coverUrl", "/api/songs/" + row.get("id") + "/cover"));
-        return new PageResult<>(rows, total, p, s);
-    }
+        @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) { return userMusicService.favorites(keyword, page, size); }
 
-    @PostMapping("/favorites/{songId}") public Map<String, String> favorite(@PathVariable long songId) {
-        catalog.song(songId, false);
-        jdbc.update("INSERT IGNORE INTO favorites(user_id,song_id) VALUES(?,?)", AuthService.current().id(), songId);
-        return Map.of("message", "已收藏");
-    }
-    @DeleteMapping("/favorites/{songId}") public Map<String, String> unfavorite(@PathVariable long songId) {
-        jdbc.update("DELETE FROM favorites WHERE user_id=? AND song_id=?", AuthService.current().id(), songId);
-        return Map.of("message", "已取消收藏");
-    }
+    @PostMapping("/favorites/{songId}") public Map<String, String> favorite(@PathVariable long songId) { return userMusicService.favorite(songId); }
+    @DeleteMapping("/favorites/{songId}") public Map<String, String> unfavorite(@PathVariable long songId) { return userMusicService.unfavorite(songId); }
 
-    public record PlaylistRequest(@NotBlank @Size(max = 100) String name, @Size(max = 500) String description) {}
-    @GetMapping("/playlists") public List<Map<String, Object>> playlists() {
-        return jdbc.queryForList("SELECT p.id,p.name,p.description,p.created_at,COUNT(visible.id) song_count," +
-            "(SELECT ps2.song_id FROM playlist_songs ps2 JOIN songs s2 ON s2.id=ps2.song_id AND s2.published=TRUE WHERE ps2.playlist_id=p.id ORDER BY ps2.added_at DESC,ps2.song_id DESC LIMIT 1) cover_song_id " +
-            "FROM playlists p LEFT JOIN playlist_songs ps ON ps.playlist_id=p.id LEFT JOIN songs visible ON visible.id=ps.song_id AND visible.published=TRUE WHERE p.user_id=? GROUP BY p.id,p.name,p.description,p.created_at ORDER BY p.id DESC", AuthService.current().id());
-    }
-    @PostMapping("/playlists") public Map<String, Object> createPlaylist(@Valid @RequestBody PlaylistRequest body) {
-        long id = jdbc.insertAndReturnId("INSERT INTO playlists(user_id,name,description) VALUES(?,?,?)", AuthService.current().id(), body.name().trim(), body.description() == null ? "" : body.description().trim());
-        return Map.of("id", id);
-    }
-    @GetMapping("/playlists/{id}") public Map<String, Object> playlist(@PathVariable long id) {
-        requirePlaylistOwner(id);
-        var playlist = jdbc.queryForMap("SELECT name,description FROM playlists WHERE id=?", id);
-        var songs = jdbc.queryForList("SELECT s.id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip FROM playlist_songs ps JOIN songs s ON s.id=ps.song_id WHERE ps.playlist_id=? AND s.published=TRUE ORDER BY ps.added_at DESC", id);
-        songs.forEach(song -> song.put("coverUrl", "/api/songs/" + song.get("id") + "/cover"));
-        return Map.of("id", id, "name", playlist.get("name"), "description", playlist.get("description"), "songs", songs);
-    }
-    @PutMapping("/playlists/{id}") public Map<String, String> renamePlaylist(@PathVariable long id, @Valid @RequestBody PlaylistRequest body) {
-        requirePlaylistOwner(id); jdbc.update("UPDATE playlists SET name=?,description=? WHERE id=?", body.name().trim(), body.description() == null ? "" : body.description().trim(), id); return Map.of("message", "已更新");
-    }
-    @DeleteMapping("/playlists/{id}") public Map<String, String> deletePlaylist(@PathVariable long id) {
-        requirePlaylistOwner(id); jdbc.update("DELETE FROM playlists WHERE id=?", id); return Map.of("message", "已删除");
-    }
-    @PostMapping("/playlists/{id}/songs/{songId}") public Map<String, String> addSong(@PathVariable long id, @PathVariable long songId) {
-        requirePlaylistOwner(id); catalog.song(songId, false);
-        jdbc.update("INSERT IGNORE INTO playlist_songs(playlist_id,song_id) VALUES(?,?)", id, songId); return Map.of("message", "已加入歌单");
-    }
-    @DeleteMapping("/playlists/{id}/songs/{songId}") public Map<String, String> removeSong(@PathVariable long id, @PathVariable long songId) {
-        requirePlaylistOwner(id); jdbc.update("DELETE FROM playlist_songs WHERE playlist_id=? AND song_id=?", id, songId); return Map.of("message", "已移出歌单");
-    }
-    @DeleteMapping("/playlists/{id}/songs") public Map<String, Object> removeSongs(@PathVariable long id, @RequestBody List<Long> songIds) {
-        requirePlaylistOwner(id);
-        if (songIds.isEmpty()) return Map.of("removed", 0);
-        if (songIds.size() > 200) throw ApiException.badRequest("一次最多移除 200 首歌曲");
-        String placeholders = String.join(",", java.util.Collections.nCopies(songIds.size(), "?"));
-        var args = new java.util.ArrayList<Object>();
-        args.add(id); args.addAll(songIds);
-        int removed = jdbc.update("DELETE FROM playlist_songs WHERE playlist_id=? AND song_id IN (" + placeholders + ")", args.toArray());
-        return Map.of("removed", removed);
-    }
-    private void requirePlaylistOwner(long id) {
-        if (jdbc.queryForObject("SELECT COUNT(*) FROM playlists WHERE id=? AND user_id=?", Long.class, id, AuthService.current().id()) == 0)
-            throw ApiException.notFound("歌单不存在");
-    }
+    @GetMapping("/playlists") public List<Map<String, Object>> playlists() { return userMusicService.playlists(); }
+    @PostMapping("/playlists") public Map<String, Object> createPlaylist(@Valid @RequestBody PlaylistRequest body) { return userMusicService.createPlaylist(body); }
+    @GetMapping("/playlists/{id}") public Map<String, Object> playlist(@PathVariable long id) { return userMusicService.playlist(id); }
+    @PutMapping("/playlists/{id}") public Map<String, String> renamePlaylist(@PathVariable long id, @Valid @RequestBody PlaylistRequest body) { return userMusicService.renamePlaylist(id, body); }
+    @DeleteMapping("/playlists/{id}") public Map<String, String> deletePlaylist(@PathVariable long id) { return userMusicService.deletePlaylist(id); }
+    @PostMapping("/playlists/{id}/songs/{songId}") public Map<String, String> addSong(@PathVariable long id, @PathVariable long songId) { return userMusicService.addSong(id, songId); }
+    @DeleteMapping("/playlists/{id}/songs/{songId}") public Map<String, String> removeSong(@PathVariable long id, @PathVariable long songId) { return userMusicService.removeSong(id, songId); }
+    @DeleteMapping("/playlists/{id}/songs") public Map<String, Object> removeSongs(@PathVariable long id, @RequestBody List<Long> songIds) { return userMusicService.removeSongs(id, songIds); }
+    @GetMapping("/membership-request") public Map<String, Object> membershipRequest() { return userMusicService.membershipRequest(); }
+    @PostMapping("/membership-request") public Map<String, String> applyMembership() { return userMusicService.applyMembership(); }
 
-    @GetMapping("/membership-request") public Map<String, Object> membershipRequest() {
-        var rows = jdbc.queryForList("SELECT id,status,created_at,reviewed_at FROM membership_requests WHERE user_id=? ORDER BY id DESC LIMIT 1", AuthService.current().id());
-        return rows.isEmpty() ? Map.of("status", "NONE") : rows.getFirst();
-    }
-    @PostMapping("/membership-request") public Map<String, String> applyMembership() {
-        var user = AuthService.current();
-        if (!user.role().equals("USER")) throw ApiException.badRequest("管理员无需申请会员");
-        if (user.membershipExpiresAt() != null && user.membershipExpiresAt().isAfter(java.time.LocalDateTime.now())) throw ApiException.badRequest("会员资格仍有效");
-        if (jdbc.queryForObject("SELECT COUNT(*) FROM membership_requests WHERE user_id=? AND status='PENDING'", Long.class, user.id()) > 0) throw ApiException.badRequest("申请正在审核中");
-        jdbc.update("INSERT INTO membership_requests(user_id) VALUES(?)", user.id());
-        return Map.of("message", "申请已提交");
-    }
-
-    public record PlayEventRequest(long songId, @Min(10) @Max(7200) int secondsPlayed, boolean completed) {}
-    @PostMapping("/play-events") public Map<String, String> playEvent(@Valid @RequestBody PlayEventRequest body) {
-        var user = AuthService.current();
-        var song = catalog.raw(body.songId());
-        if (!Boolean.TRUE.equals(song.get("published"))) throw ApiException.notFound("歌曲已下架");
-        int duration = ((Number) song.get("duration_seconds")).intValue();
-        int limit = Boolean.TRUE.equals(song.get("vip")) && !user.member() && !"ADMIN".equals(user.role()) ? 30 : duration;
-        if (limit > 0 && body.secondsPlayed() > limit + 3) throw ApiException.badRequest("播放时长超过可播放范围");
-        String key = "play:dedupe:" + user.id() + ":" + body.songId();
-        if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, "1", Duration.ofSeconds(30)))) return Map.of("message", "播放记录已接收");
-        jdbc.update("INSERT INTO play_events(user_id,song_id,seconds_played,completed) VALUES(?,?,?,?)", user.id(), body.songId(), body.secondsPlayed(), body.completed());
-        jdbc.update("UPDATE songs SET play_count=play_count+1 WHERE id=?", body.songId());
-        catalog.invalidateHot();
-        return Map.of("message", "播放记录已保存");
-    }
-    @GetMapping("/history") public PageResult<Map<String, Object>> history(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "") String keyword) {
-        long user = AuthService.current().id(); int p = PageResult.safePage(page), s = PageResult.safeSize(size);
-        String filter = keyword.isBlank() ? "" : " AND (LOWER(s.title) LIKE ? OR LOWER(s.artist) LIKE ? OR LOWER(s.album_name) LIKE ?)";
-        String term = "%" + keyword.trim().toLowerCase(java.util.Locale.ROOT) + "%";
-        Object[] countArgs = filter.isEmpty() ? new Object[]{user} : new Object[]{user, term, term, term};
-        long total = jdbc.queryForObject("SELECT COUNT(DISTINCT e.song_id) AS total FROM play_events e JOIN songs s ON s.id=e.song_id WHERE e.user_id=? AND s.published=TRUE" + filter, Long.class, countArgs);
-        Object[] rowArgs = filter.isEmpty() ? new Object[]{user, s, (p - 1) * s} : new Object[]{user, term, term, term, s, (p - 1) * s};
-        var rows = jdbc.queryForList("SELECT e.id event_id,e.seconds_played,e.completed,e.created_at,s.id song_id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip " +
-            "FROM (SELECT song_id,MAX(id) latest_id FROM play_events WHERE user_id=? GROUP BY song_id) latest " +
-            "JOIN play_events e ON e.id=latest.latest_id JOIN songs s ON s.id=e.song_id AND s.published=TRUE " +
-            "WHERE 1=1" + filter + " ORDER BY e.id DESC LIMIT ? OFFSET ?", rowArgs);
-        rows.forEach(row -> row.put("coverUrl", "/api/songs/" + row.get("song_id") + "/cover"));
-        return new PageResult<>(rows, total, p, s);
-    }
+    @PostMapping("/play-events") public Map<String, String> playEvent(@Valid @RequestBody PlayEventRequest body) { return userMusicService.playEvent(body); }
+    @GetMapping("/history") public PageResult<Map<String, Object>> history(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "") String keyword) { return userMusicService.history(page, size, keyword); }
 }
