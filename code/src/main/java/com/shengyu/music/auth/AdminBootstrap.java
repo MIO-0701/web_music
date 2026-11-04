@@ -11,6 +11,7 @@ import com.shengyu.music.persistence.UsersMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+/** 管理员初始化模块：启动时读取环境变量，在 MySQL users 表创建初始管理员。 */
 @Configuration
 public class AdminBootstrap {
     private static final Logger log = LoggerFactory.getLogger(AdminBootstrap.class);

@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+/** 媒体存储层：连接 MinIO 的 shengyu-media 桶，负责音频、封面和试听对象的上传、删除及范围读取。 */
 @Service
 public class MediaStorage {
     private final MinioClient client;
@@ -30,6 +31,9 @@ public class MediaStorage {
         this.bucket = bucket;
     }
 
+    /**
+     * 确认 MinIO 媒体桶存在；不存在时创建私有桶供后续上传使用。
+     */
     @PostConstruct public void ensureBucket() throws Exception {
         Exception last = null;
         for (int attempt = 0; attempt < 15; attempt++) {
@@ -45,6 +49,13 @@ public class MediaStorage {
         throw last;
     }
 
+    /**
+     * 上传媒体文件。
+     * @param path path 参数
+     * @param type type 参数
+     * @param extension extension 参数
+     * @return 操作结果
+     */
     public String put(Path path, String type, String extension) {
         String key = type + "/" + UUID.randomUUID() + "." + extension.toLowerCase();
         try (InputStream input = Files.newInputStream(path)) {
@@ -54,17 +65,33 @@ public class MediaStorage {
         } catch (Exception ex) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "文件存储失败"); }
     }
 
+    /**
+     * 查询媒体文件大小。
+     * @param key key 参数
+     * @return 操作结果
+     */
     public long size(String key) {
         try { return client.statObject(StatObjectArgs.builder().bucket(bucket).object(key).build()).size(); }
         catch (Exception ex) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "文件读取失败"); }
     }
 
+    /**
+     * 删除记录。
+     * @param key key 参数
+     */
     public void delete(String key) {
         if (key == null || key.isBlank()) return;
         try { client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(key).build()); }
         catch (Exception ex) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "文件删除失败"); }
     }
 
+    /**
+     * 按范围读取媒体文件。
+     * @param key key 参数
+     * @param offset offset 参数
+     * @param length length 参数
+     * @return 操作结果
+     */
     public InputStream read(String key, long offset, long length) {
         try {
             var args = GetObjectArgs.builder().bucket(bucket).object(key).offset(offset);
@@ -73,6 +100,11 @@ public class MediaStorage {
         } catch (Exception ex) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "文件读取失败"); }
     }
 
+    /**
+     * 查询媒体文件类型。
+     * @param extension extension 参数
+     * @return 操作结果
+     */
     public static String contentType(String extension) {
         return switch (extension.toLowerCase()) {
             case "mp3" -> "audio/mpeg";

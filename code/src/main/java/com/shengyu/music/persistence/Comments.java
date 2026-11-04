@@ -2,6 +2,7 @@ package com.shengyu.music.persistence;
 
 import com.baomidou.mybatisplus.annotation.*;
 
+/** 持久层实体：映射 MySQL shengyu 库的 comments：歌曲评论正文、作者和审核状态。 */
 @TableName("comments")
 public class Comments {
     @TableId(value = "id", type = IdType.AUTO)

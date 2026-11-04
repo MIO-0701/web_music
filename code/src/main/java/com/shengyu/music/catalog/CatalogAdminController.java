@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+/** 曲库管理接口层：接收管理员上传、编辑、上下架和批量操作请求，交给曲库管理业务层。 */
 @RestController
 @RequestMapping("/api/admin/songs")
 public class CatalogAdminController {
@@ -21,11 +22,27 @@ public class CatalogAdminController {
     private final BatchSongImportService batches;
     public CatalogAdminController(CatalogAdminService admin, CatalogService catalog, BatchSongImportService batches) { this.admin = admin; this.catalog = catalog; this.batches = batches; }
 
+    /**
+     * 接收查询歌曲列表请求，调用对应业务服务并返回接口响应。
+
+     * @param keyword 可选搜索关键词
+
+     * @param page 从 1 开始的页码
+
+     * @param size 每页记录数
+     * @return 接口响应
+     */
     @GetMapping public PageResult<Map<String, Object>> list(@RequestParam(required = false) String keyword,
         @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
         return catalog.search(keyword, null, null, null, page, size, true);
     }
 
+    /**
+     * 接收查询歌曲详情请求，调用对应业务服务并返回接口响应。
+
+     * @param id 目标记录 ID
+     * @return 接口响应
+     */
     @GetMapping("/{id}") public Map<String, Object> detail(@PathVariable long id) { return catalog.song(id, true); }
 
     @PostMapping(consumes = "multipart/form-data")
@@ -54,17 +71,36 @@ public class CatalogAdminController {
         } finally { Files.deleteIfExists(audioTemp); if (coverTemp != null) Files.deleteIfExists(coverTemp); }
     }
 
+    /** 封装 EditSong 相关数据和行为。 */
     public record EditSong(String title, String artist, String album, String genre, String description,
         boolean vip, boolean published, List<String> tags) {}
+    /**
+     * 接收编辑歌曲信息请求，调用对应业务服务并返回接口响应。
+     * @param id 目标记录 ID
+     * @param body 已解析的请求内容
+     * @return 接口响应
+     */
     @PutMapping("/{id}") public Map<String, String> edit(@PathVariable long id, @RequestBody EditSong body) {
         admin.edit(id, body.title(), body.artist(), body.album(), body.genre(), body.description(), body.vip(), body.published(), body.tags());
         return Map.of("message", "已更新");
     }
+    /**
+     * 接收设置歌曲上架状态请求，调用对应业务服务并返回接口响应。
+     * @param id 目标记录 ID
+     * @param value 待设置的新状态或值
+     * @return 接口响应
+     */
     @PatchMapping("/{id}/publish") public Map<String, String> publish(@PathVariable long id, @RequestParam boolean value) {
         admin.publish(id, value); return Map.of("message", value ? "已上架" : "已下架");
     }
 
+    /** 歌曲批量操作请求，包含歌曲 ID 列表和操作类型。 */
     public record BatchRequest(List<Long> ids, String action) {}
+    /**
+     * 接收批量处理歌曲请求，调用对应业务服务并返回接口响应。
+     * @param body 已解析的请求内容
+     * @return 接口响应
+     */
     @PostMapping("/batch/actions") public Map<String, Object> batch(@RequestBody BatchRequest body) {
         return Map.of("processed", admin.batch(body.ids(), body.action()));
     }

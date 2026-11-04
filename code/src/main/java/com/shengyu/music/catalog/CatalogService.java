@@ -14,6 +14,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.springframework.stereotype.Service;
 
+/** 曲库查询业务层：从 MySQL songs、song_tags 等表搜索歌曲和标签，并用 Redis 缓存热门列表。 */
 @Service
 public class CatalogService {
     private final SongsMapper songs;
@@ -22,6 +23,18 @@ public class CatalogService {
     private final ObjectMapper json;
     public CatalogService(SongsMapper songs, SongTagsMapper tags, StringRedisTemplate redis, ObjectMapper json) { this.songs = songs; this.tags = tags; this.redis = redis; this.json = json; }
 
+    /**
+     * 按条件分页查询曲库。
+     * 处理流程：按关键词、曲风、语言、会员状态过滤；普通接口只返回已上架歌曲，管理员可查看全部。
+     * @param keyword 搜索关键词
+     * @param genre 曲风
+     * @param language 语言
+     * @param vip 是否为会员歌曲
+     * @param page 页码
+     * @param size 每页条数
+     * @param admin 是否使用管理员可见范围
+     * @return 歌曲分页结果
+     */
     public PageResult<Map<String, Object>> search(String keyword, String genre, String language, Boolean vip, int page, int size, boolean admin) {
         int p = PageResult.safePage(page), s = PageResult.safeSize(size);
         QueryWrapper<Songs> query = Wrappers.query();
@@ -36,10 +49,22 @@ public class CatalogService {
         return new PageResult<>(rows.stream().map(this::publicSong).toList(), total, p, s);
     }
 
+    /**
+     * 汇总曲风列表。
+     * 处理流程：按已上架歌曲统计曲风及数量。
+     * @return 曲风及歌曲数量列表
+     */
     public List<Map<String, Object>> genres() {
         return songs.selectMaps(Wrappers.<Songs>query().select("genre", "COUNT(*) AS song_count").eq("published", true).ne("genre", "").ne("genre", "未分类").groupBy("genre").orderByDesc("song_count").orderByAsc("genre"));
     }
 
+    /**
+     * 查询歌曲详情。
+     * 处理流程：读取歌曲与标签；普通用户只能查看已上架歌曲，并移除内部存储键。
+     * @param id 记录 ID
+     * @param admin 是否使用管理员可见范围
+     * @return 歌曲详情
+     */
     public Map<String, Object> song(long id, boolean admin) {
         var rows = songs.selectMaps(Wrappers.<Songs>query().eq("id", id).eq(!admin, "published", true));
         if (rows.isEmpty()) throw ApiException.notFound("歌曲不存在或已下架");
@@ -48,12 +73,23 @@ public class CatalogService {
         return result;
     }
 
+    /**
+     * 读取歌曲原始数据。
+     * 处理流程：按 ID 从 MySQL 查询包含内部媒体键的歌曲，供业务层使用。
+     * @param id 记录 ID
+     * @return 包含内部字段的歌曲数据
+     */
     public Map<String, Object> raw(long id) {
         var rows = songs.selectMaps(Wrappers.<Songs>query().eq("id", id));
         if (rows.isEmpty()) throw ApiException.notFound("歌曲不存在");
         return rows.getFirst();
     }
 
+    /**
+     * 获取热门歌曲。
+     * 处理流程：优先读取 Redis 缓存；未命中时从 MySQL 按播放量查询并写回缓存。
+     * @return 热门歌曲列表
+     */
     public List<Map<String, Object>> hot() {
         try {
             String cached = redis.opsForValue().get("catalog:hot");
@@ -65,8 +101,17 @@ public class CatalogService {
         return list;
     }
 
+    /**
+     * 清除热门歌曲缓存。
+     */
     public void invalidateHot() { try { redis.delete("catalog:hot"); } catch (Exception ignored) { } }
 
+    /**
+     * 转换公开歌曲信息。
+     * @param String String 参数
+     * @param row row 参数
+     * @return 操作结果
+     */
     private Map<String, Object> publicSong(Map<String, Object> row) {
         Map<String, Object> out = new LinkedHashMap<>(row);
         long id = ((Number) row.get("id")).longValue();

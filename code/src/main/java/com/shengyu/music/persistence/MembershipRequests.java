@@ -2,6 +2,7 @@ package com.shengyu.music.persistence;
 
 import com.baomidou.mybatisplus.annotation.*;
 
+/** 持久层实体：映射 MySQL shengyu 库的 membership_requests：用户会员申请及审核状态。 */
 @TableName("membership_requests")
 public class MembershipRequests {
     @TableId(value = "id", type = IdType.AUTO)

@@ -2,6 +2,7 @@ package com.shengyu.music.persistence;
 
 import com.baomidou.mybatisplus.annotation.*;
 
+/** 持久层实体：映射 MySQL shengyu 库的 users：账号、密码哈希、角色、启用状态和会员到期时间。 */
 @TableName("users")
 public class Users {
     @TableId(value = "id", type = IdType.AUTO)

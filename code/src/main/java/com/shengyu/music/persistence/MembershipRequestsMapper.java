@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Select;
 import java.util.List;
 import java.util.Map;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 membership_requests：用户会员申请及审核状态。 提供该表的数据访问方法。 */
 @Mapper
 public interface MembershipRequestsMapper extends BaseMapper<MembershipRequests> {
     @Select("SELECT id,status,created_at,reviewed_at FROM membership_requests WHERE user_id=#{userId} ORDER BY id DESC LIMIT 1")

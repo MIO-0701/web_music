@@ -7,7 +7,9 @@ import java.util.stream.Collectors;
 public final class RecommendationEngine {
     private RecommendationEngine() {}
     public record Interaction(long userId, long itemId, double weight) {}
+    /** 推荐计算层：实现标签相似度和物品协同过滤排序，不访问数据库。 */
     public record Ranked(long itemId, double score, String reason) {}
+    /** 封装 ItemModel 相关数据和行为。 */
     public record ItemModel(Map<Long, Map<Long, Double>> dot, Map<Long, Double> norm) {}
 
     public static List<Ranked> byTags(long userId, Set<Long> candidates, List<Interaction> interactions,
@@ -29,6 +31,11 @@ public final class RecommendationEngine {
         return itemCollaborative(userId, candidates, interactions, popularity, buildItemModel(interactions), limit);
     }
 
+    /**
+     * 构建歌曲相似度模型。
+     * @param interactions interactions 参数
+     * @return 操作结果
+     */
     public static ItemModel buildItemModel(List<Interaction> interactions) {
         Map<Long, Map<Long, Double>> byUser = new HashMap<>();
         for (Interaction i : interactions) byUser.computeIfAbsent(i.userId(), ignored -> new HashMap<>()).merge(i.itemId(), i.weight(), Double::sum);

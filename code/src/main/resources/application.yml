@@ -1,6 +1,7 @@
 server:
   port: ${SERVER_PORT:8080}
 spring:
+  # MySQL 的 shengyu 库保存用户、曲库、歌单、评论、播放记录和推荐等持久业务数据。
   config:
     import:
       - optional:file:../.env[.properties]
@@ -10,9 +11,11 @@ spring:
     username: ${DB_USER:shengyu}
     password: ${DB_PASSWORD:shengyu_dev}
   flyway:
+    # 首次启动及后续升级时，按 db/migration 中的 SQL 版本维护 MySQL 表结构。
     enabled: true
   data:
     redis:
+      # Redis 保存登录令牌、热门曲库缓存及短期去重/限流状态。
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
   servlet:
@@ -33,6 +36,7 @@ music:
     username: ${ADMIN_USERNAME:}
     password: ${ADMIN_PASSWORD:}
   storage:
+    # MinIO 私有桶保存音频、试听片段与封面；MySQL songs 表只记录对象键。
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     access-key: ${MINIO_ACCESS_KEY:shengyu}
     secret-key: ${MINIO_SECRET_KEY:shengyu_dev_password}

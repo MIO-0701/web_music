@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 import java.util.Map;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 playlist_songs：歌单包含的歌曲及加入时间。 提供该表的数据访问方法。 */
 @Mapper
 public interface PlaylistSongsMapper extends BaseMapper<PlaylistSongs> {
     @Insert("INSERT IGNORE INTO playlist_songs(playlist_id,song_id) VALUES(#{playlistId},#{songId})")

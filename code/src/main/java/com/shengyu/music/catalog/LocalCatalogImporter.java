@@ -16,6 +16,7 @@ import com.shengyu.music.persistence.SongsMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Component;
 
+/** 本地曲库导入模块：启动时按开关读取本地音频与封面，幂等导入 MySQL 和 MinIO。 */
 @Component
 public class LocalCatalogImporter implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(LocalCatalogImporter.class);
@@ -33,6 +34,10 @@ public class LocalCatalogImporter implements ApplicationRunner {
         this.json = json; this.songsMapper = songsMapper; this.admin = admin;
     }
 
+    /**
+     * 应用启动后按导入开关扫描本地音乐和封面，跳过已导入素材并汇总导入结果。
+     * @param args args 参数
+     */
     @Override public void run(ApplicationArguments args) throws Exception {
         if (!enabled) return;
         Path manifest = imageRoot.resolve("_cover-manifest.json");

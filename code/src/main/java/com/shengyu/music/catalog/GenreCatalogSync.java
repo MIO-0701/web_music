@@ -30,6 +30,9 @@ public class GenreCatalogSync {
     }
 
     @EventListener(ApplicationReadyEvent.class)
+    /**
+     * 同步数据。
+     */
     public void sync() throws Exception {
         if (!Files.isRegularFile(catalogPath)) {
             log.warn("Genre catalog not found: {}", catalogPath);

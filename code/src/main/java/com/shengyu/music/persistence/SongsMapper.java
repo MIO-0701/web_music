@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Update;
 import java.util.List;
 import java.util.Map;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 songs：歌曲元数据、发布和会员状态，以及 MinIO 媒体对象键。 提供该表的数据访问方法。 */
 @Mapper
 public interface SongsMapper extends BaseMapper<Songs> {
     @Select("SELECT id,title,artist,album_name,genre,duration_seconds,vip,play_count score,'当前热门歌曲' reason FROM songs WHERE published=TRUE ORDER BY play_count DESC,id DESC LIMIT 20")

@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 import java.util.Map;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 favorites：用户收藏歌曲的关联关系。 提供该表的数据访问方法。 */
 @Mapper
 public interface FavoritesMapper extends BaseMapper<Favorites> {
     @Insert("INSERT IGNORE INTO favorites(user_id,song_id) VALUES(#{userId},#{songId})")

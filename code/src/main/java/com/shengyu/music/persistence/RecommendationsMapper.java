@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 import java.util.Map;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 recommendations：按用户、歌曲、算法保存的推荐分数与原因。 提供该表的数据访问方法。 */
 @Mapper
 public interface RecommendationsMapper extends BaseMapper<Recommendations> {
     @Select("SELECT s.id,s.title,s.artist,s.album_name,s.genre,s.duration_seconds,s.vip,r.score,r.reason,r.generated_at FROM recommendations r JOIN songs s ON s.id=r.song_id WHERE r.user_id=#{userId} AND r.algorithm=#{algorithm} AND s.published=TRUE ORDER BY r.score DESC,s.id LIMIT 20")

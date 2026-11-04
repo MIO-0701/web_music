@@ -2,6 +2,7 @@ package com.shengyu.music.persistence;
 
 import com.baomidou.mybatisplus.annotation.*;
 
+/** 持久层实体：映射 MySQL shengyu 库的 songs：歌曲元数据、发布和会员状态，以及 MinIO 媒体对象键。 */
 @TableName("songs")
 public class Songs {
     @TableId(value = "id", type = IdType.AUTO)

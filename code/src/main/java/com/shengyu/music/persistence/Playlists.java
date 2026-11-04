@@ -2,6 +2,7 @@ package com.shengyu.music.persistence;
 
 import com.baomidou.mybatisplus.annotation.*;
 
+/** 持久层实体：映射 MySQL shengyu 库的 playlists：用户创建的歌单及其名称。 */
 @TableName("playlists")
 public class Playlists {
     @TableId(value = "id", type = IdType.AUTO)

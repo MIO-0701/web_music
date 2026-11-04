@@ -11,16 +11,27 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+/** 公共异常处理层：统一转换业务、校验及未知异常为 API 错误响应。 */
 @RestControllerAdvice
 public class ApiErrorAdvice {
     private static final Logger log = LoggerFactory.getLogger(ApiErrorAdvice.class);
 
     @ExceptionHandler(ApiException.class)
+    /**
+     * 处理业务异常。
+     * @param ex ex 参数
+     * @return 操作结果
+     */
     public ResponseEntity<Map<String, Object>> api(ApiException ex) {
         return ResponseEntity.status(ex.status()).body(Map.of("error", ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
+    /**
+     * 处理参数校验异常。
+     * @param ex ex 参数
+     * @return 操作结果
+     */
     public ResponseEntity<Map<String, Object>> validation(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().stream().findFirst()
             .map(FieldError::getDefaultMessage).orElse("请求参数不正确");
@@ -28,11 +39,21 @@ public class ApiErrorAdvice {
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
+    /**
+     * 处理数据冲突异常。
+     * @param ex ex 参数
+     * @return 操作结果
+     */
     public ResponseEntity<Map<String, Object>> conflict(DataIntegrityViolationException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", "数据冲突或关联记录不存在"));
     }
 
     @ExceptionHandler(Exception.class)
+    /**
+     * 处理未预期异常。
+     * @param ex ex 参数
+     * @return 操作结果
+     */
     public ResponseEntity<Map<String, Object>> unexpected(Exception ex) {
         log.error("Unhandled API error", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "服务暂时不可用"));

@@ -2,6 +2,7 @@ package com.shengyu.music.persistence;
 
 import com.baomidou.mybatisplus.annotation.*;
 
+/** 持久层实体：映射 MySQL shengyu 库的 ai_messages：会话消息、解析条件与匹配歌曲结果。 */
 @TableName("ai_messages")
 public class AiMessages {
     @TableId(value = "id", type = IdType.AUTO)

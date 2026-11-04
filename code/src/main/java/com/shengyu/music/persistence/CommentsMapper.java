@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 import java.util.Map;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 comments：歌曲评论正文、作者和审核状态。 提供该表的数据访问方法。 */
 @Mapper
 public interface CommentsMapper extends BaseMapper<Comments> {
     @Select("<script>SELECT COUNT(*) FROM comments c JOIN users u ON u.id=c.user_id JOIN songs s ON s.id=c.song_id WHERE 1=1 " +

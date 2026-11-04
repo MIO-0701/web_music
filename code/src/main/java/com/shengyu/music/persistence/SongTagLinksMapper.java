@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Select;
 import java.util.List;
 import java.util.Map;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 song_tag_links：歌曲与标签的多对多关系。 提供该表的数据访问方法。 */
 @Mapper
 public interface SongTagLinksMapper extends BaseMapper<SongTagLinks> {
     @Select("SELECT l.song_id,t.name FROM song_tag_links l JOIN song_tags t ON t.id=l.tag_id JOIN songs s ON s.id=l.song_id WHERE s.published=TRUE")

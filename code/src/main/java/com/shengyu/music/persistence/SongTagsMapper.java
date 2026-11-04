@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import java.util.List;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 song_tags：可复用的歌曲标签名称。 提供该表的数据访问方法。 */
 @Mapper
 public interface SongTagsMapper extends BaseMapper<SongTags> {
     @Insert("INSERT IGNORE INTO song_tags(name) VALUES(#{name})")

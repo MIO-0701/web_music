@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 import java.util.Map;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 play_events：用户的实际播放时长和完成状态，供历史与推荐使用。 提供该表的数据访问方法。 */
 @Mapper
 public interface PlayEventsMapper extends BaseMapper<PlayEvents> {
     @Select("SELECT song_id,SUM(weight) weight FROM (SELECT song_id,LEAST(COUNT(*),5)*1.0 weight FROM play_events WHERE user_id=#{userId} AND seconds_played>=10 AND created_at>=CURDATE()-INTERVAL 1 DAY AND created_at<CURDATE() GROUP BY song_id UNION ALL SELECT song_id,3.0 weight FROM favorites WHERE user_id=#{userId} AND created_at>=CURDATE()-INTERVAL 1 DAY AND created_at<CURDATE()) x GROUP BY song_id")

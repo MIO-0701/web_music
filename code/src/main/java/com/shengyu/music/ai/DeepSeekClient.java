@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+/** 模型调用层：向 DeepSeek 发送对话历史并解析结构化查歌条件。 */
 @Service
 public class DeepSeekClient {
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
@@ -26,6 +27,12 @@ public class DeepSeekClient {
         this.model = model; this.apiKey = apiKey;
     }
 
+    /**
+     * 解析外部响应。
+     * @param String String 参数
+     * @param history history 参数
+     * @return 操作结果
+     */
     public JsonNode parse(List<Map<String, String>> history) {
         if (apiKey.isBlank()) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "尚未配置 DeepSeek API Key");
         try {

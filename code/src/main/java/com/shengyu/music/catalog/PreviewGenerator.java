@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+/** 试听生成组件：调用 FFmpeg 从 MP3 生成限定时长的会员歌曲试听文件。 */
 @Service
 public class PreviewGenerator {
     private final String ffmpeg;
@@ -15,6 +16,11 @@ public class PreviewGenerator {
     public PreviewGenerator(@Value("${music.preview.ffmpeg}") String ffmpeg, @Value("${music.preview.seconds}") int seconds) {
         this.ffmpeg = ffmpeg; this.seconds = seconds;
     }
+    /**
+     * 生成试听片段。
+     * @param source source 参数
+     * @return 操作结果
+     */
     public Path generate(Path source) {
         try {
             Path target = Files.createTempFile("shengyu-preview-", ".mp3");

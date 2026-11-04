@@ -17,6 +17,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/** 曲库管理业务层：校验歌曲数据，向 MinIO 存储媒体，更新 MySQL 歌曲与标签，并清理热门缓存。 */
 @Service
 public class CatalogAdminService {
     private static final Logger log = LoggerFactory.getLogger(CatalogAdminService.class);
@@ -55,6 +56,7 @@ public class CatalogAdminService {
         long id = song.id;
         setTags(id, tags == null ? List.of() : tags);
         catalog.invalidateHot();
+        log.info("歌曲创建成功，songId={}", id);
         return id;
     }
 
@@ -82,8 +84,15 @@ public class CatalogAdminService {
             .set("description", description).set("vip", vip).set("published", published));
         setTags(id, tags == null ? List.of() : tags);
         catalog.invalidateHot();
+        log.info("歌曲更新成功，songId={}", id);
     }
 
+    /**
+     * 设置歌曲上架状态。
+     * 处理流程：上架前校验音频时长及会员试听文件，更新 songs.published 并清理热门缓存。
+     * @param id 记录 ID
+     * @param published 是否上架
+     */
     public void publish(long id, boolean published) {
         var row = catalog.raw(id);
         if (published && ((Number) row.get("duration_seconds")).intValue() <= 0)
@@ -92,8 +101,16 @@ public class CatalogAdminService {
             throw ApiException.badRequest("会员歌曲必须先生成试听文件");
         songs.update(null, Wrappers.<Songs>update().eq("id", id).set("published", published));
         catalog.invalidateHot();
+        log.info("歌曲上架状态已更新，songId={}, published={}", id, published);
     }
 
+    /**
+     * 批量上下架、删除或调整会员状态。
+     * 处理流程：校验歌曲 ID 和操作类型；逐条更新 songs；删除操作在事务提交后清理 MinIO 对象。
+     * @param ids 记录 ID 列表
+     * @param action 批量操作类型
+     * @return 实际处理的去重歌曲数量
+     */
     @Transactional
     public int batch(List<Long> ids, String action) {
         if (ids == null || ids.isEmpty() || ids.size() > 100 || ids.stream().anyMatch(id -> id == null || id <= 0))
@@ -106,6 +123,9 @@ public class CatalogAdminService {
                 .filter(Objects::nonNull).map(String::valueOf).toList();
             for (long id : unique) songs.deleteById(id);
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                /**
+                 * 数据库删除事务提交后清理对应的 MinIO 媒体对象。
+                 */
                 @Override public void afterCommit() {
                     for (String key : keys) try { storage.delete(key); }
                     catch (Exception ex) { log.warn("Could not remove media object {} after song deletion", key, ex); }
@@ -133,9 +153,15 @@ public class CatalogAdminService {
             }
         }
         catalog.invalidateHot();
+        log.info("歌曲批量操作完成，action={}, count={}", action, unique.size());
         return unique.size();
     }
 
+    /**
+     * 替换歌曲标签。
+     * @param songId 歌曲 ID
+     * @param tags 歌曲标签
+     */
     private void setTags(long songId, List<String> tags) {
         tagLinks.delete(Wrappers.<SongTagLinks>query().eq("song_id", songId));
         for (String raw : tags.stream().filter(Objects::nonNull).map(String::trim).filter(s -> !s.isBlank()).distinct().limit(12).toList()) {
@@ -146,10 +172,21 @@ public class CatalogAdminService {
         }
     }
 
+    /**
+     * 提取文件扩展名。
+     * @param path path 参数
+     * @return 操作结果
+     */
     public static String extension(Path path) {
         String name = path.getFileName().toString(); int dot = name.lastIndexOf('.');
         return dot < 0 ? "" : name.substring(dot + 1).toLowerCase();
     }
+    /**
+     * 校验必填文本及长度。
+     * @param value 待设置的新状态或值
+     * @param max max 参数
+     * @param label label 参数
+     */
     private void requireText(String value, int max, String label) {
         if (value == null || value.isBlank() || value.trim().length() > max) throw ApiException.badRequest(label + "不能为空或过长");
     }

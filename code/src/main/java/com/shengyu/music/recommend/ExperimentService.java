@@ -17,6 +17,7 @@ import com.shengyu.music.persistence.RecommendationExperimentsMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 
+/** 离线评估业务层：读取 Last.fm 数据集，计算推荐指标并把实验结果写入 MySQL。 */
 @Service
 public class ExperimentService {
     private static final int MAX_ARTISTS = 800;
@@ -29,10 +30,18 @@ public class ExperimentService {
     public ExperimentService(@Value("${music.experiment.dataset-path:../data/hetrec2011-lastfm-2k.zip}") String datasetPath,
         RecommendationExperimentsMapper experimentsMapper, ObjectMapper json) { this.dataset = Path.of(datasetPath).toAbsolutePath().normalize(); this.experimentsMapper = experimentsMapper; this.json = json; }
 
+    /**
+     * 查询推荐实验记录。
+     * @return 操作结果
+     */
     public List<Map<String, Object>> experiments() {
         return experimentsMapper.selectMaps(Wrappers.<RecommendationExperiments>query().orderByDesc("id").last("LIMIT 20"));
     }
 
+    /**
+     * 评估推荐结果。
+     * @return 操作结果
+     */
     public List<Map<String, Object>> evaluate() {
         if (!Files.isRegularFile(dataset)) throw new ApiException(HttpStatus.BAD_REQUEST, "找不到 Last.fm 数据集 ZIP，请设置 MUSIC_EXPERIMENT_DATASET_PATH");
         try (ZipFile zip = new ZipFile(dataset.toFile())) {
@@ -93,6 +102,11 @@ public class ExperimentService {
             "coverage", recommended.size() / (double) candidates.size(), "evaluatedUsers", users.size());
     }
 
+    /**
+     * 解析收听记录。
+     * @param zip zip 参数
+     * @return 操作结果
+     */
     private Map<Long, Map<Long, Double>> parseListens(ZipFile zip) throws Exception {
         Map<Long, Map<Long, Double>> data = new HashMap<>();
         try (BufferedReader reader = reader(zip, "user_artists.dat")) {
@@ -106,6 +120,11 @@ public class ExperimentService {
         }
         return data;
     }
+    /**
+     * 解析歌曲标签。
+     * @param zip zip 参数
+     * @return 操作结果
+     */
     private Map<Long, Set<String>> parseTags(ZipFile zip) throws Exception {
         Map<Long, Set<String>> tags = new HashMap<>();
         try (BufferedReader reader = reader(zip, "user_taggedartists.dat")) {
@@ -118,10 +137,22 @@ public class ExperimentService {
         }
         return tags;
     }
+    /**
+     * 打开数据读取器。
+     * @param zip zip 参数
+     * @param suffix suffix 参数
+     * @return 操作结果
+     */
     private BufferedReader reader(ZipFile zip, String suffix) throws Exception {
         ZipEntry entry = zip.stream().filter(item -> item.getName().endsWith(suffix)).findFirst().orElseThrow(() -> new IllegalArgumentException("ZIP 缺少 " + suffix));
         return new BufferedReader(new InputStreamReader(zip.getInputStream(entry), StandardCharsets.UTF_8));
     }
+    /**
+     * 计算稳定哈希值。
+     * @param user user 参数
+     * @param item item 参数
+     * @return 操作结果
+     */
     private long stableHash(long user, long item) {
         long x = user * 0x9e3779b97f4a7c15L ^ item * 0xbf58476d1ce4e5b9L ^ SEED;
         x ^= x >>> 30; x *= 0xbf58476d1ce4e5b9L; x ^= x >>> 27; x *= 0x94d049bb133111ebL; return x ^ (x >>> 31);

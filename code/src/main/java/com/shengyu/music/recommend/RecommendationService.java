@@ -19,6 +19,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/** 在线推荐业务层：汇总 MySQL 播放与收藏信号，生成推荐并写入 recommendations 表；每日定时重建。 */
 @Service
 public class RecommendationService {
     private static final Logger log = LoggerFactory.getLogger(RecommendationService.class);
@@ -35,6 +36,11 @@ public class RecommendationService {
         this.plays = plays; this.tagLinks = tagLinks; this.redis = redis; this.json = json;
     }
 
+    /**
+     * 重新生成全部用户推荐。
+     * @param algorithm 推荐算法标识
+     * @return 处理的用户数量
+     */
     public List<Map<String, Object>> mine(String algorithm) {
         if (!List.of("TAG", "ITEM_CF").contains(algorithm)) throw ApiException.badRequest("推荐算法须为 TAG 或 ITEM_CF");
         long user = AuthService.current().id();
@@ -85,9 +91,17 @@ public class RecommendationService {
         return rows;
     }
 
+    /**
+     * 生成每日推荐。
+     */
     @Scheduled(cron = "0 0 6 * * *", zone = "Asia/Shanghai")
     public void daily() { rebuild(); }
 
+    /**
+     * 重新生成全部用户推荐。
+     * 处理流程：读取用户交互与候选歌曲，执行标签和物品协同过滤排序，替换 MySQL 中的推荐结果。
+     * @return 处理的用户数量
+     */
     @Transactional
     public synchronized int rebuild() {
         List<Long> users = usersMapper.selectList(Wrappers.<Users>query().select("id").eq("role", "USER").eq("enabled", true)).stream().map(user -> user.id).toList();
@@ -116,10 +130,21 @@ public class RecommendationService {
         return users.size();
     }
 
+    /**
+     * 加载用户交互数据。
+     * @return 操作结果
+     */
     private List<RecommendationEngine.Interaction> loadInteractions() {
         return plays.interactions().stream().map(row -> new RecommendationEngine.Interaction(((Number) row.get("user_id")).longValue(), ((Number) row.get("song_id")).longValue(), ((Number) row.get("weight")).doubleValue())).toList();
     }
 
+    /**
+     * 保存推荐结果。
+     * @param user user 参数
+     * @param algorithm 推荐算法标识
+     * @param ranked ranked 参数
+     * @param now now 参数
+     */
     private void save(long user, String algorithm, List<RecommendationEngine.Ranked> ranked, LocalDateTime now) {
         for (var item : ranked) {
             Recommendations entry = new Recommendations(); entry.userId = user; entry.songId = item.itemId();

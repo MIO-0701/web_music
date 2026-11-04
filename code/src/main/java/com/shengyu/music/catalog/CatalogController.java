@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/** 曲库接口层：提供歌曲搜索、详情、封面和音频流；根据会员身份决定是否只返回试听文件。 */
 @RestController
 @RequestMapping("/api/songs")
 public class CatalogController {
@@ -19,16 +20,51 @@ public class CatalogController {
     private final MediaStorage storage;
     public CatalogController(CatalogService catalog, MediaStorage storage) { this.catalog = catalog; this.storage = storage; }
 
+    /**
+     * 接收按条件搜索歌曲请求，调用对应业务服务并返回接口响应。
+
+     * @param keyword 可选搜索关键词
+
+     * @param genre genre 参数
+
+     * @param language language 参数
+
+     * @param vip 是否为会员歌曲
+
+     * @param page 从 1 开始的页码
+
+     * @param size 每页记录数
+     * @return 接口响应
+     */
     @GetMapping public PageResult<Map<String, Object>> search(@RequestParam(required = false) String keyword,
         @RequestParam(required = false) String genre, @RequestParam(required = false) String language,
         @RequestParam(required = false) Boolean vip,
         @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
         return catalog.search(keyword, genre, language, vip, page, size, false);
     }
+    /**
+     * 接收查询曲风请求，调用对应业务服务并返回接口响应。
+     * @return 接口响应
+     */
     @GetMapping("/genres") public List<Map<String, Object>> genres() { return catalog.genres(); }
+    /**
+     * 接收查询热门歌曲请求，调用对应业务服务并返回接口响应。
+     * @return 接口响应
+     */
     @GetMapping("/hot") public List<Map<String, Object>> hot() { return catalog.hot(); }
+    /**
+     * 接收查询歌曲详情请求，调用对应业务服务并返回接口响应。
+     * @param id 目标记录 ID
+     * @return 接口响应
+     */
     @GetMapping("/{id}") public Map<String, Object> song(@PathVariable long id) { return catalog.song(id, false); }
 
+    /**
+     * 接收读取歌曲封面请求，调用对应业务服务并返回接口响应。
+
+     * @param id 目标记录 ID
+     * @return 接口响应
+     */
     @GetMapping("/{id}/cover") public ResponseEntity<InputStreamResource> cover(@PathVariable long id) {
         catalog.song(id, false);
         String key = (String) catalog.raw(id).get("cover_key");

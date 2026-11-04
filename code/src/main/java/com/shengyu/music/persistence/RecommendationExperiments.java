@@ -2,6 +2,7 @@ package com.shengyu.music.persistence;
 
 import com.baomidou.mybatisplus.annotation.*;
 
+/** 持久层实体：映射 MySQL shengyu 库的 recommendation_experiments：离线算法的精确率、召回率和覆盖率结果。 */
 @TableName("recommendation_experiments")
 public class RecommendationExperiments {
     @TableId(value = "id", type = IdType.AUTO)

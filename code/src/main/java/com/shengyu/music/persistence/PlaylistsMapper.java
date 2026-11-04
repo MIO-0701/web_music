@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Select;
 import java.util.List;
 import java.util.Map;
 
+/** 持久层 Mapper：连接 MySQL shengyu 库的 playlists：用户创建的歌单及其名称。 提供该表的数据访问方法。 */
 @Mapper
 public interface PlaylistsMapper extends BaseMapper<Playlists> {
     @Select("SELECT p.id,p.name,p.description,p.created_at,COUNT(visible.id) song_count," +
